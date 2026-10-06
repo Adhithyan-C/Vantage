@@ -1,0 +1,11 @@
+export const SOURCE_IDS = ['reddit', 'hackernews', 'devforums', 'snapshot'] as const;
+export const LEAD_LABELS = ['buyer_intent', 'competitor_complaint', 'venting', 'noise'] as const;
+export const CRITERION_IDS = ['states_problem', 'asks_for_recommendation', 'mentions_team_or_budget', 'shows_urgency', 'names_competitor'] as const;
+export const RUN_STATUSES = ['running', 'completed', 'completed_with_warnings', 'failed'] as const;
+export const SOURCE_STATUSES = ['pending', 'running', 'ok', 'degraded', 'failed', 'skipped'] as const;
+export const LEAD_STATUSES = ['new', 'accepted', 'rejected'] as const;
+export const EVENT_KINDS = ['info', 'progress', 'warning', 'error'] as const;
+export const AGENTS = ['scout', 'displacement', 'classifier', 'enricher', 'scorer', 'suggester', 'monitor'] as const;
+export const DECISION_STATUSES = ['ok', 'invalid_output', 'error'] as const;
+export const FEEDBACK_ACTIONS = ['accept', 'reject', 'reset'] as const;
+export const SCORE_COMPONENT_NAMES = ['intent', 'fit', 'recency', 'engagement'] as const;

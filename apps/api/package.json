@@ -1,0 +1,21 @@
+{
+  "name": "@vantage/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "dotenv": "18.0.5",
+    "express": "5.2.1",
+    "zod": "4.6.5",
+    "@vantage/shared": "*"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "26.6.4",
+    "tsx": "4.23.15"
+  }
+}
