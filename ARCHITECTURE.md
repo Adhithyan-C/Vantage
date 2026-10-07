@@ -52,7 +52,7 @@ The seller in the demo is a fictional helpdesk / customer-support tool competing
 
 ```
  Sources (free, public)                      Dashboard (React + TS)
- Reddit JSON, HN Algolia,  ----+                    ^
+ Reddit API, HN Algolia,  ----+                    ^
  dev forums, saved snapshot    |                    | reads + realtime
                                v                    |
                           [ Scout ] -----> Supabase (Postgres + Realtime)
@@ -134,6 +134,7 @@ vantage/
         types.ts                    # RawSignal, Decision, Lead, Theme, etc.
         schemas.ts                  # Zod schemas (LLM outputs + API)
         constants.ts                # labels, criteria ids
+        index.ts                    # re-exports constants, schemas, types
   apps/
     api/
       src/
@@ -380,7 +381,7 @@ Every source implements:
 ```ts
 export interface SourceAdapter {
   readonly id: 'reddit' | 'hackernews' | 'devforums' | 'snapshot';
-  search(query: SourceQuery, ctx: AdapterContext): Promise<RawSignal[]>;
+  search(query: SourceQuery, ctx: AdapterContext): Promise<AdapterResult>;
 }
 
 export interface RawSignal {
@@ -403,8 +404,8 @@ Rules for all adapters:
 
 ### 7.1 Per-source notes
 
-- Reddit: use the public JSON listing and search endpoints (a `.json` suffix on public URLs). `TODO(verify)` current rate limits and terms in Reddit's documentation before implementing. Permalinks must be built from the permalink field the API returns, never guessed.
-- Hacker News: use the Algolia HN search API and/or the official Firebase API. `TODO(verify)` endpoint parameters from the official docs.
+- Reddit: unauthenticated `.json` access was shut down in May 2026 and returns HTTP 403. Use ONLY the official Reddit Data API with OAuth app credentials (host `oauth.reddit.com`). If REDDIT_CLIENT_ID or REDDIT_CLIENT_SECRET is not set, the adapter reports status `skipped`. Never try to bypass a block or use proxies. `TODO(verify)` current rate limits and terms in Reddit's documentation before implementing. Permalinks must be built from the permalink field the API returns, never guessed.
+- Hacker News: use the Algolia HN search API and/or the official Firebase API. Endpoint and parameters verified in October 2026: see section 18.1. Show a small "Search by Algolia" credit in the UI (attribution is reportedly required).
 - Dev forums: Stack Exchange API and GitHub issues/discussions search. `TODO(verify)` auth and rate limits from official docs.
 - Snapshot: reads `fixtures/review-snapshot.json`. This stands in for review sites that need paid or protected access. Label it "Saved snapshot" in the UI.
 
@@ -569,6 +570,8 @@ SUPABASE_SERVICE_ROLE_KEY      # backend only
 GEMINI_API_KEY
 GROQ_API_KEY
 REDDIT_USER_AGENT
+REDDIT_CLIENT_ID               # optional until the Reddit adapter is built
+REDDIT_CLIENT_SECRET           # optional until the Reddit adapter is built
 STACKEXCHANGE_KEY              # optional, TODO(verify)
 GITHUB_TOKEN                   # optional, TODO(verify)
 DEMO_MODE
@@ -616,3 +619,58 @@ Definition of done per step: it runs, relevant tests pass, you report exactly wh
 - Minimum data stored; no full profile collection.
 - No automated messaging; the human decides whether and how to contact anyone, following each platform's rules.
 - Evidence is verified against stored source text; scores are reproducible from stored inputs.
+
+---
+
+## 18. Amendments (added after Phase 1, October 2026)
+
+These amendments override anything earlier in this file that conflicts with them.
+
+### 18.1 Hacker News adapter (verified)
+
+- Endpoint: `https://hn.algolia.com/api/v1/search_by_date` (newest first). No API key.
+- Query parameters used: `query` (keyword), `tags=(story,comment)` (parentheses mean OR), `numericFilters=created_at_i>UNIX_SECONDS`, `hitsPerPage` (max 100 per request).
+- Hit fields used: `objectID`, `author`, `comment_text` (comments), `title` and `story_text` (stories), `created_at`, `created_at_i`, `points`, `num_comments`, `_tags`.
+- Permalink: `https://news.ycombinator.com/item?id=<objectID>`.
+- Text fields contain HTML and must be converted to plain text before storing.
+- Search results are capped at 1000 hits per query regardless of page. Phase 2 uses one page per keyword only.
+- Show "Search by Algolia" attribution in the UI footer.
+
+### 18.2 Reddit status
+
+Reddit's unauthenticated `.json` endpoints return 403 since May 2026. Access requires registering an app and using the official Data API with OAuth, and new credentials may need approval. The Reddit adapter is built in a later step (Phase 2B), only after the human has working credentials. Until then Reddit is not enabled, and Reddit demo data must be clearly labeled as sample data, never presented as live.
+
+### 18.3 Adapter types (replace the interface in section 7)
+
+```ts
+export interface SourceQuery {
+  keywords: string[];
+  sinceDays: number;
+  maxResults: number;          // total cap per adapter call
+}
+
+export interface AdapterContext {
+  fetch: typeof fetch;         // injected so tests never touch the network
+  now: () => Date;
+  userAgent: string;
+  timeoutMs: number;
+  maxRetries: number;
+}
+
+export interface AdapterResult {
+  signals: RawSignal[];
+  status: 'ok' | 'degraded' | 'failed' | 'skipped';
+  error?: string;              // first error message, if any
+}
+```
+
+### 18.4 Dedupe rule
+
+Dedupe first by (`source`, `externalId`), then by content hash across all sources, keeping the first occurrence. Content-hash dedupe applies only when the normalized text is at least 40 characters long.
+
+### 18.5 Extra files added by Phase 2
+
+- `apps/api/src/utils/text.ts` (HTML to plain text)
+- `apps/api/src/scripts/scout-cli.ts` (dev CLI that runs Scout from the terminal)
+- Root and API `package.json` get a `scout` script
+- `fixtures/hn/` holds one recorded real HN response
