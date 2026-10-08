@@ -5,6 +5,8 @@ const EnvSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   GEMINI_API_KEY: z.string().min(1),
   REDDIT_USER_AGENT: z.string().min(1),
+  REDDIT_CLIENT_ID: z.string().min(1).optional(),
+  REDDIT_CLIENT_SECRET: z.string().min(1).optional(),
   SUPABASE_ANON_KEY: z.string().min(1).optional(),
   GROQ_API_KEY: z.string().min(1).optional(),
   STACKEXCHANGE_KEY: z.string().min(1).optional(),

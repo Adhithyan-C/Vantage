@@ -13,7 +13,8 @@
     "dev:api": "npm run dev --workspace @vantage/api",
     "dev:web": "npm run dev --workspace @vantage/web",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "vitest run"
+    "test": "vitest run",
+    "scout": "npm run scout --workspace @vantage/api --"
   },
   "devDependencies": {
     "typescript": "7.0.2",

@@ -2,6 +2,19 @@ import { describe, it, expect } from 'vitest';
 import { loadEnv } from '../src/config/env.js';
 
 describe('loadEnv', () => {
+  it('when REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are given along with the 4 required variables, loadEnv returns them', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      GEMINI_API_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      REDDIT_CLIENT_ID: 'id123',
+      REDDIT_CLIENT_SECRET: 'secret123'
+    });
+    expect(env.REDDIT_CLIENT_ID).toBe('id123');
+    expect(env.REDDIT_CLIENT_SECRET).toBe('secret123');
+  });
+
   it('all 4 required variables given: returns PORT 3001 and DEMO_MODE false', () => {
     const env = loadEnv({
       SUPABASE_URL: 'x',

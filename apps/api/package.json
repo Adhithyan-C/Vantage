@@ -5,13 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "scout": "tsx src/scripts/scout-cli.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "2.117.2",
+    "@vantage/shared": "*",
     "dotenv": "18.0.5",
     "express": "5.2.1",
-    "zod": "4.6.5",
-    "@vantage/shared": "*"
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/express": "5.0.6",
