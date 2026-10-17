@@ -19,8 +19,10 @@ export function toSignalRow(signal: RawSignal) {
 export async function upsertSignals(
   db: SupabaseClient,
   signals: RawSignal[]
-): Promise<{ inserted: number; updated: number }> {
-  if (signals.length === 0) return { inserted: 0, updated: 0 };
+): Promise<{ inserted: number; updated: number; signalIds: string[] }> {
+  if (signals.length === 0) {
+    return { inserted: 0, updated: 0, signalIds: [] };
+  }
 
   const rows = signals.map(toSignalRow);
 
@@ -64,11 +66,20 @@ export async function upsertSignals(
     .filter(r => existingIds.has(r.external_id))
     .map(r => ({ id: existingIds.get(r.external_id)!, engagement: r.engagement }));
 
-  // Insert new rows
+  // Insert new rows and get their IDs
+  let insertedIdsMap = new Map<string, string>();
   if (toInsert.length > 0) {
-    const { error } = await db.from('signals').insert(toInsert);
+    const { data: insertedRows, error } = await db
+      .from('signals')
+      .insert(toInsert)
+      .select('id, external_id');
+
     if (error) {
       throw new Error(`Supabase error in insert: ${error.message}`);
+    }
+
+    for (const row of insertedRows) {
+      insertedIdsMap.set(row.external_id as string, row.id as string);
     }
   }
 
@@ -84,5 +95,16 @@ export async function upsertSignals(
     }
   }
 
-  return { inserted: toInsert.length, updated: toUpdate.length };
+  // Build signalIds array in the same order as input signals
+  const signalIds: string[] = [];
+  for (const signal of signals) {
+    const id = existingIds.get(signal.externalId) ?? insertedIdsMap.get(signal.externalId);
+    if (id === undefined) {
+      // This should not happen because every signal is either existing or inserted
+      throw new Error(`Could not determine ID for signal ${signal.externalId}`);
+    }
+    signalIds.push(id);
+  }
+
+  return { inserted: toInsert.length, updated: toUpdate.length, signalIds };
 }

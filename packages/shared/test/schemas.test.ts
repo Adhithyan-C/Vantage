@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { ClassifierOutputSchema, RawSignalSchema, SellerProfileInputSchema } from '../src';
+import { ClassifierOutputSchema, RawSignalSchema, SellerProfileInputSchema, RunCreateRequestSchema } from '../src';
 import seller from '../../../fixtures/seller-helpdesk.json';
 
 describe('schemas', () => {
@@ -76,5 +76,77 @@ describe('schemas', () => {
 
   it('the fixture seller passes SellerProfileInputSchema.safeParse', () => {
     expect(SellerProfileInputSchema.safeParse(seller).success).toBe(true);
+  });
+
+  it('a valid RunCreateRequest (the fixture seller plus keywords ["zendesk alternative"], sinceDays 90, maxResults 50) passes RunCreateRequestSchema.safeParse', () => {
+    const valid = {
+      seller,
+      params: {
+        keywords: ['zendesk alternative'],
+        sinceDays: 90,
+        maxResults: 50,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(valid).success).toBe(true);
+  });
+
+  it('an empty keywords array fails', () => {
+    const invalid = {
+      seller,
+      params: {
+        keywords: [],
+        sinceDays: 90,
+        maxResults: 50,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('a keyword made only of spaces fails', () => {
+    const invalid = {
+      seller,
+      params: {
+        keywords: ['   '],
+        sinceDays: 90,
+        maxResults: 50,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('sinceDays 0 fails', () => {
+    const invalid = {
+      seller,
+      params: {
+        keywords: ['zendesk alternative'],
+        sinceDays: 0,
+        maxResults: 50,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('maxResults 101 fails', () => {
+    const invalid = {
+      seller,
+      params: {
+        keywords: ['zendesk alternative'],
+        sinceDays: 90,
+        maxResults: 101,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
+  });
+
+  it('11 keywords fails', () => {
+    const invalid = {
+      seller,
+      params: {
+        keywords: Array(11).fill('keyword'),
+        sinceDays: 90,
+        maxResults: 50,
+      },
+    };
+    expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
   });
 });

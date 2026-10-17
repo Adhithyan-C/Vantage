@@ -1,4 +1,4 @@
-# Vantage: ARCHITECTURE.md
+﻿# Vantage: ARCHITECTURE.md
 
 This file is the single source of truth for building Vantage. Read it completely before writing any code. If something you need is not in this file, do not invent it: add it to "Open decisions" in section 16 and ask the human.
 
@@ -674,3 +674,174 @@ Dedupe first by (`source`, `externalId`), then by content hash across all source
 - `apps/api/src/scripts/scout-cli.ts` (dev CLI that runs Scout from the terminal)
 - Root and API `package.json` get a `scout` script
 - `fixtures/hn/` holds one recorded real HN response
+
+---
+
+## 19. Phase 3A: run pipeline backend (added October 2026)
+
+These rules override anything earlier that conflicts with them.
+
+### 19.1 Shared package additions (packages/shared)
+
+- constants.ts: add 'orchestrator' to the END of the AGENTS array.
+- schemas.ts adds:
+
+```ts
+export const RunParamsSchema = z.object({
+  keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
+  sinceDays: z.number().int().min(1).max(365),
+  maxResults: z.number().int().min(1).max(100),
+});
+
+export const RunCreateRequestSchema = z.object({
+  seller: SellerProfileInputSchema,
+  params: RunParamsSchema,
+});
+```
+
+- types.ts adds:
+
+```ts
+export type RunStatus = (typeof RUN_STATUSES)[number];
+export type SourceStatus = (typeof SOURCE_STATUSES)[number];
+export type EventKind = (typeof EVENT_KINDS)[number];
+export type AgentId = (typeof AGENTS)[number];
+export type RunParams = z.infer<typeof RunParamsSchema>;
+export type RunCreateRequest = z.infer<typeof RunCreateRequestSchema>;
+
+export interface RunSourceView {
+  source: SourceId;
+  status: SourceStatus;
+  fetchedCount: number;
+  error: string | null;
+}
+
+export interface RunView {
+  id: string;
+  status: RunStatus;
+  demo: boolean;
+  params: RunParams;
+  startedAt: string;
+  finishedAt: string | null;
+  seller: {
+    productName: string;
+    problemDescription: string;
+    idealCustomer: string | null;
+    competitors: string[];
+  };
+  sources: RunSourceView[];
+  signalCount: number;
+}
+
+export interface RunEvent {
+  id: number;
+  runId: string;
+  agent: AgentId;
+  kind: EventKind;
+  message: string;
+  counts: Record<string, unknown> | null;
+  createdAt: string;
+}
+```
+
+### 19.2 Database
+
+New file supabase/migrations/0002_run_events_read_policy.sql containing exactly:
+
+```sql
+create policy "anon can read run_events"
+  on run_events for select to anon using (true);
+```
+
+No other tables get policies in this phase. The human runs this file in the Supabase SQL editor.
+
+### 19.3 RunStore (apps/api/src/db/runs.ts)
+
+All database access for runs goes through this interface. runPipeline never talks to Supabase directly.
+
+```ts
+export interface SourcePatch {
+  status: SourceStatus;
+  fetchedCount?: number;
+  error?: string | null;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+export interface RunStore {
+  createSellerProfile(input: SellerProfileInput): Promise<string>;
+  createRun(sellerProfileId: string, params: RunParams): Promise<string>;
+  getRun(runId: string): Promise<RunView | null>;
+  listEvents(runId: string, afterId: number): Promise<RunEvent[]>;
+  setRunStatus(runId: string, status: RunStatus, finished: boolean): Promise<void>;
+  upsertRunSource(runId: string, source: SourceId, patch: SourcePatch): Promise<void>;
+  addEvent(runId: string, agent: AgentId, kind: EventKind, message: string, counts?: Record<string, unknown>): Promise<void>;
+  storeSignals(runId: string, signals: RawSignal[]): Promise<{ inserted: number; updated: number }>;
+  failStaleRuns(): Promise<number>;
+}
+```
+
+createRunStore(db: SupabaseClient): RunStore implements it with these rules:
+- createSellerProfile inserts into seller_profiles (product_name, problem_description, ideal_customer or null, competitors) and returns the new id.
+- createRun inserts into runs (seller_profile_id, status 'running', demo false, params) and returns the new id.
+- getRun: query runs by id with maybeSingle (return null if missing); then seller_profiles by the run's seller_profile_id; then run_sources by run_id; then run_signals (select signal_id) by run_id for signalCount (the number of rows). Map snake_case to the camelCase RunView exactly as in 19.1. Sort sources by source name.
+- listEvents: run_events where run_id equals runId and id greater than afterId, ordered by id ascending, limit 500, mapped to RunEvent. Convert id to a JavaScript number.
+- setRunStatus: update runs set status; if finished is true also set finished_at to the current ISO time.
+- upsertRunSource: upsert into run_sources with onConflict 'run_id,source'. Send only the fields present in the patch (mapped: fetchedCount to fetched_count, startedAt to started_at, finishedAt to finished_at).
+- addEvent: insert into run_events (run_id, agent, kind, message, counts or null).
+- storeSignals: call upsertSignals(db, signals) (which now also returns signalIds), then upsert rows { run_id, signal_id } into run_signals with onConflict 'run_id,signal_id' and ignoreDuplicates true. Return { inserted, updated }.
+- failStaleRuns: update runs set status 'failed' and finished_at now where status is 'running'; return how many rows were changed.
+- Any Supabase error is thrown as new Error(`Supabase error in <method>: ${error.message}`).
+
+upsertSignals (apps/api/src/db/queries.ts) changes: it now returns { inserted, updated, signalIds } where signalIds is the ids of every signal passed in (newly inserted ones via .select('id') on the insert, plus the existing ones found by the lookup). If it is called with an empty array it returns { inserted: 0, updated: 0, signalIds: [] } and makes no database calls.
+
+### 19.4 Progress events (apps/api/src/orchestrator/events.ts)
+
+createEmitter(store: RunStore, runId: string) returns an object with info, progress, warning and error. Each is (agent: AgentId, message: string, counts?: Record<string, unknown>) => Promise<void>, calls store.addEvent with the matching kind, and NEVER throws: if addEvent throws, catch it and console.error the error message only.
+
+### 19.5 runPipeline (apps/api/src/orchestrator/runPipeline.ts)
+
+```ts
+export interface PipelineDeps { store: RunStore; adapters: SourceAdapter[]; ctx: AdapterContext; }
+export function computeRunStatus(reports: Array<{ status: SourceStatus }>): RunStatus;
+export async function runPipeline(deps: PipelineDeps, runId: string, params: RunParams): Promise<void>;
+```
+
+computeRunStatus: if there are no reports return 'failed'. If every report is 'ok' return 'completed'. Otherwise, if any report is 'ok' or 'degraded' return 'completed_with_warnings'. Otherwise return 'failed'.
+
+runPipeline never throws. It does this, in order:
+1. Create the emitter.
+2. Emit orchestrator/info "Run started" with counts { keywords: <number>, sinceDays, maxResults }.
+3. If adapters is empty: emit orchestrator/error "No sources are enabled", call store.setRunStatus(runId, 'failed', true), and return.
+4. For each adapter: store.upsertRunSource(runId, adapter.id, { status: 'running', startedAt: <now ISO> }).
+5. Emit scout/progress `Searching ${ids.join(', ')} for ${n} keyword(s)` where ids are the adapter ids and n is the number of keywords.
+6. Call runScout({ adapters, query: { keywords, sinceDays, maxResults }, ctx }).
+7. For each source report: store.upsertRunSource(runId, report.source, { status: report.status, fetchedCount: report.fetched, error: report.error ?? null, finishedAt: <now ISO> }). Then emit scout/<kind> with message `${source}: ${status}, fetched ${fetched}` and, only when there is an error text, append ` (${error})`. kind is 'info' for ok, 'warning' for degraded or skipped, 'error' for failed. counts { source, status, fetched }.
+8. Emit scout/progress `Removed ${fetchedTotal - afterDedupe} duplicate(s): ${afterDedupe} unique signal(s)` with counts { fetched: fetchedTotal, afterDedupe }.
+9. If afterDedupe is 0: emit scout/warning "No signals found. Try different keywords or a longer time window." Otherwise call store.storeSignals(runId, result.signals) and emit scout/progress `Stored ${inserted} new and refreshed ${updated} existing signal(s)` with counts { inserted, updated }.
+10. status = computeRunStatus(source reports). Call store.setRunStatus(runId, status, true). Emit orchestrator with message "Run completed" (kind info) if status is 'completed', "Run completed with warnings" (kind warning) if 'completed_with_warnings', or "Run failed: no source succeeded" (kind error) if 'failed'. counts { signals: afterDedupe }.
+11. Wrap steps 4 to 10 in try/catch. On any thrown error: emit orchestrator/error `Run failed: ${message}`, then call store.setRunStatus(runId, 'failed', true) inside its own try/catch that ignores errors.
+
+### 19.6 HTTP API (apps/api/src/routes/runs.ts)
+
+createRunsRouter(deps: PipelineDeps): express.Router, mounted at the ROOT of the app (no /api prefix; the web dev server will proxy). Error bodies are always JSON { error: string, issues?: string[] }. Every handler is wrapped in try/catch and answers 500 { error: 'Internal error' } on an unexpected error (log the message with console.error, never the request body).
+
+- POST /runs: validate req.body with RunCreateRequestSchema.safeParse. On failure answer 400 { error: 'Invalid request', issues: ['<path>: <message>', ...] }. On success: sellerId = store.createSellerProfile(seller), runId = store.createRun(sellerId, params); answer 202 { runId } IMMEDIATELY; then start runPipeline(deps, runId, params) WITHOUT awaiting it (add .catch that console.errors the message). If creating the profile or run throws, answer 500 { error: 'Could not create run' }.
+- GET /runs/:runId: if runId does not match /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i answer 400 { error: 'Invalid run id' }. If store.getRun returns null answer 404 { error: 'Run not found' }. Otherwise 200 with the RunView.
+- GET /runs/:runId/events?after=N: same runId check. `after` is optional, default 0; if present it must be a non-negative integer, otherwise 400 { error: 'Invalid after' }. Answer 200 { events: RunEvent[] } (from store.listEvents).
+- GET /demo-seller: answer 200 { seller: <demo seller>, params: DEMO_RUN_PARAMS }. This has exactly the shape that POST /runs accepts.
+
+### 19.7 Demo config (apps/api/src/config/demo.ts)
+
+- DEMO_RUN_PARAMS = { keywords: ['zendesk alternative', 'helpdesk software'], sinceDays: 90, maxResults: 50 }.
+- loadDemoSeller(): reads fixtures/seller-helpdesk.json using readFileSync with fileURLToPath(new URL('../../../../fixtures/seller-helpdesk.json', import.meta.url)), parses it with JSON.parse, validates with SellerProfileInputSchema.parse, and returns it. Do NOT use a JSON import statement.
+
+### 19.8 Startup (apps/api/src/index.ts)
+
+Keep the existing env loading and failure behavior. Wrap the startup in an async function main() called as main().catch(...) that prints the message and exits with code 1. In main: getEnv, createDb, createRunStore, then try { await store.failStaleRuns() } catch (log a warning with the message and CONTINUE). Then app.use(express.json()), keep GET /health, app.use(createRunsRouter({ store, adapters: getEnabledAdapters(), ctx: defaultAdapterContext() })), then listen on env.PORT.
+
+defaultAdapterContext() is a new export of apps/api/src/sources/index.ts returning { fetch: globalThis.fetch, now: () => new Date(), userAgent: 'vantage-lab-project/0.1', timeoutMs: SOURCE_CONFIG.requestTimeoutMs, maxRetries: SOURCE_CONFIG.maxRetries }.
+
+### 19.9 Files added or changed
+
+packages/shared/src/{constants,schemas,types}.ts, packages/shared/test/schemas.test.ts, supabase/migrations/0002_run_events_read_policy.sql, apps/api/src/config/demo.ts, apps/api/src/sources/index.ts, apps/api/src/db/queries.ts, apps/api/src/db/runs.ts, apps/api/src/orchestrator/events.ts, apps/api/src/orchestrator/runPipeline.ts, apps/api/src/routes/runs.ts, apps/api/src/index.ts, and tests apps/api/test/runPipeline.test.ts and apps/api/test/demo.test.ts.

@@ -44,3 +44,14 @@ export const ScoreBreakdownSchema = z.object({
   components: z.array(ScoreComponentSchema).length(4),
   total: z.number().int().min(0).max(100),
 });
+
+export const RunParamsSchema = z.object({
+  keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
+  sinceDays: z.number().int().min(1).max(365),
+  maxResults: z.number().int().min(1).max(100),
+});
+
+export const RunCreateRequestSchema = z.object({
+  seller: SellerProfileInputSchema,
+  params: RunParamsSchema,
+});
