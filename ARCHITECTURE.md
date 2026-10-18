@@ -845,3 +845,33 @@ defaultAdapterContext() is a new export of apps/api/src/sources/index.ts returni
 ### 19.9 Files added or changed
 
 packages/shared/src/{constants,schemas,types}.ts, packages/shared/test/schemas.test.ts, supabase/migrations/0002_run_events_read_policy.sql, apps/api/src/config/demo.ts, apps/api/src/sources/index.ts, apps/api/src/db/queries.ts, apps/api/src/db/runs.ts, apps/api/src/orchestrator/events.ts, apps/api/src/orchestrator/runPipeline.ts, apps/api/src/routes/runs.ts, apps/api/src/index.ts, and tests apps/api/test/runPipeline.test.ts and apps/api/test/demo.test.ts.
+
+
+---
+
+## 20. Phase 3B: web Setup and Run screens (added October 2026)
+
+These rules override anything earlier that conflicts with them.
+
+### 20.1 Decisions
+
+- Live progress uses polling, not Supabase Realtime. The Run page calls GET /runs/:id and GET /runs/:id/events?after=N once per second until the run is no longer 'running', then reads events once more (the final event is written just after the status changes). Realtime stays an optional later upgrade; migration 0002 stays in place.
+- Routing uses hash routes with no router package: `#/` is the Setup page, `#/runs/<uuid>` is the Run page. Anything else shows "Page not found".
+- The web dev server proxies `/api` to http://localhost:3001 and strips the `/api` prefix (apps/web/vite.config.ts, `server.proxy` only). The API has no `/api` prefix and no CORS. This is the only permitted change to vite.config.ts; path aliases remain forbidden.
+- Styling is plain CSS with variables in src/styles/tokens.css (light and dark through prefers-color-scheme, one accent colour, semantic colours only for status). Tailwind is not used yet. No new packages were added to apps/web.
+- Status is always shown as text as well as colour.
+
+### 20.2 Files (all under apps/web)
+
+- vite.config.ts (proxy added), src/main.tsx (imports tokens.css), src/styles/tokens.css
+- src/app/App.tsx, src/app/routes.tsx
+- src/lib/api.ts (fetch client for /api), src/lib/format.ts
+- src/hooks/useRunEvents.ts (the polling hook)
+- src/components/SourceHealthBadge.tsx, PipelineProgress.tsx, EmptyState.tsx, ErrorState.tsx
+- src/pages/SetupPage.tsx, src/pages/RunPage.tsx
+
+### 20.3 Behaviour
+
+- Setup: product, problem, ideal customer (optional), competitors (comma list), keywords (comma list, 1 to 10), look-back days (1 to 365), max results (1 to 100). Validated in the browser with RunCreateRequestSchema from @vantage/shared, with inline field errors. "Load demo seller" fills the form from GET /demo-seller. The Sources panel is read-only (Hacker News live; Reddit, developer forums and review sites shown as unavailable). Submit calls POST /runs and navigates to the Run page.
+- Run: header with status, pipeline card (Scout live, the other four stages shown as "Planned"), per-source health, a result card when finished, and the event log (`role="log"`, polite live region). Network errors show a retry button after 5 failed polls; 400 and 404 stop polling at once.
+- Footer (every page): "Vantage finds public signals. It does not provide contact details or send messages." plus the "Search by Algolia" attribution.

@@ -1,12 +1,42 @@
-import React from 'react';
-import { SOURCE_IDS } from '@vantage/shared';
+import { EmptyState } from '../components/EmptyState';
+import { RunPage } from '../pages/RunPage';
+import { SetupPage } from '../pages/SetupPage';
+import { useRoute } from './routes';
 
 export function App() {
+  const route = useRoute();
+
   return (
-    <div>
-      <h1>Vantage</h1>
-      <p>Phase 1 scaffold</p>
-      <p>Sources configured: {SOURCE_IDS.join(', ')}</p>
+    <div className="app">
+      <header className="app-header">
+        <a className="brand" href="#/">
+          Vantage
+        </a>
+        <span className="tagline">Public buying signals, with the evidence shown</span>
+        <nav aria-label="Main">
+          <a className="nav-link" href="#/">
+            New search
+          </a>
+        </nav>
+      </header>
+
+      <main className="app-main">
+        {route.name === 'setup' && <SetupPage />}
+        {route.name === 'run' && <RunPage key={route.runId} runId={route.runId} />}
+        {route.name === 'not-found' && (
+          <EmptyState
+            title="Page not found"
+            hint="Go back to the search form to start a new run."
+          />
+        )}
+      </main>
+
+      <footer className="app-footer">
+        <p>Vantage finds public signals. It does not provide contact details or send messages.</p>
+        <p>
+          Hacker News data: <a href="https://hn.algolia.com">Search by Algolia</a>
+        </p>
+      </footer>
     </div>
   );
 }
