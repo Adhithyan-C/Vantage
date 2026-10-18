@@ -1083,4 +1083,8 @@ Plain CSS added to src/styles/tokens.css using the existing variables (no new li
 ### 24.8 Files
 API: verification/verifyQuote.ts, db/leads.ts, routes/leads.ts, index.ts, packages/shared (types.ts, schemas.ts). Web: app/routes.tsx, app/App.tsx, lib/api.ts, lib/format.ts (formatAge, label text), lib/inbox.ts, lib/evidence.ts, pages/InboxPage.tsx, pages/SignalDetailPage.tsx, pages/RunPage.tsx, components/SignalCard.tsx, EvidenceQuote.tsx, CriteriaChecklist.tsx, ScoreBreakdown.tsx, ReasoningTrace.tsx, styles/tokens.css, plus tests.
 
+## 25. Phase 6.1 fixes
+
+The classifier's `classified` count includes reused decisions, so enricher progress uses that count directly and scoring runs only when it is greater than zero. Rank badges appear only for buyer-intent and competitor-complaint signals, and the no-ranked-signals scorer event is informational so the stage completes normally. Signal cards show “Quotes verified” at full confidence, “Some quotes could not be verified” below full confidence, and no verification wording when confidence is unavailable.
+
 

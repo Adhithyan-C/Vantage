@@ -7,14 +7,18 @@ export function SignalCard({ signal, runId }: { signal: LeadView; runId: string 
   return (
     <article className={`card signal-card${signal.status === 'rejected' ? ' signal-rejected' : ''}`}>
       <div className="signal-card-top">
-        <span className="badge">Rank {signal.rank}</span>
+        {ranked && <span className="badge">Rank {signal.rank}</span>}
         <span className="badge">{LABEL_TEXT[signal.label]}</span>
         {ranked ? <span className="badge">Score {signal.score}</span> : <span className="badge">Not ranked</span>}
         {signal.status === 'rejected' && <span className="badge status-rejected">Rejected</span>}
         {signal.status === 'accepted' && <span className="badge status-accepted">Accepted</span>}
       </div>
       <p className="muted signal-meta">
-        {signal.confidence !== null && `Evidence check: ${Math.round(signal.confidence * 100)}% · `}
+        {signal.confidence === 1
+          ? 'Quotes verified · '
+          : signal.confidence !== null && signal.confidence < 1
+            ? 'Some quotes could not be verified · '
+            : ''}
         {SOURCE_LABEL[signal.source]}{signal.community ? ` · ${signal.community}` : ''} · @{signal.authorHandle} · {formatAge(signal.createdAtSource, Date.now())}
       </p>
       <p>{signal.rationale}</p>

@@ -106,12 +106,25 @@ describe('runPipeline scoring integration', () => {
     expect(scoredRun).toBe(RUN_ID);
     expect(store.events.filter((event) => event.agent === 'enricher' || event.agent === 'scorer'))
       .toEqual([
-        { agent: 'enricher', kind: 'progress', message: 'Enriching 3 classified signal(s)', counts: { total: 3 } },
+        { agent: 'enricher', kind: 'progress', message: 'Enriching 2 classified signal(s)', counts: { total: 2 } },
         { agent: 'enricher', kind: 'info', message: 'Enriched 3 signal(s)', counts: { enriched: 3 } },
         { agent: 'scorer', kind: 'progress', message: 'Scoring 3 signal(s)', counts: { total: 3 } },
         { agent: 'scorer', kind: 'info', message: 'Scored 3 signal(s): 2 in the ranked list', counts: { scored: 3, ranked: 2, topScore: 81 } },
       ]);
     expect(store.statusCalls.at(-1)).toBe('completed');
+  });
+
+  it('uses classified alone for enricher progress when some classifications were reused', async () => {
+    const store = new PipelineStore();
+    await execute(store, {
+      classify: async () => summary({ classified: 2, reused: 1 }),
+      score: async () => ({ scored: 2, ranked: 1, topScore: 81 }),
+    });
+    expect(store.events.find((event) => event.agent === 'enricher' && event.kind === 'progress'))
+      .toMatchObject({
+        message: 'Enriching 2 classified signal(s)',
+        counts: { total: 2 },
+      });
   });
 
   it('emits a scorer error on failure and completes with warnings', async () => {
@@ -126,19 +139,19 @@ describe('runPipeline scoring integration', () => {
     expect(store.statusCalls.at(-1)).toBe('completed_with_warnings');
   });
 
-  it('warns when no leads qualify without changing a healthy run status', async () => {
+  it('reports when no signals qualify without changing a healthy run status', async () => {
     const store = new PipelineStore();
     const score: ScoreStage = async () => ({ scored: 2, ranked: 0, topScore: null });
     await execute(store, { classify: async () => summary(), score });
     expect(store.events.at(-2)).toMatchObject({
       agent: 'scorer',
-      kind: 'warning',
+      kind: 'info',
       message: 'No buyer intent or competitor complaint signals in this run',
     });
     expect(store.statusCalls.at(-1)).toBe('completed');
   });
 
-  it('skips scoring when classification did not run or has no classified/reused items', async () => {
+  it('skips scoring when classification did not run or has no classified items', async () => {
     const skippedStore = new PipelineStore();
     await execute(skippedStore, { score: async () => ({ scored: 1, ranked: 1, topScore: 50 }) });
     expect(skippedStore.events.some((event) => event.agent === 'scorer')).toBe(false);

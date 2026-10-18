@@ -93,10 +93,16 @@ describe('Enricher and Scorer pipeline stages', () => {
     });
     expect(agentStageStatus('enricher', 'Enriched ', run('running'), [enricherInfo])).toBe('Completed');
     expect(agentStageStatus('scorer', 'Scored ', run('running'), [scorerInfo])).toBe('Completed');
+    const noRankedScorerInfo = stageEvent(
+      'scorer',
+      'info',
+      'Scored 2 signal(s): 0 in the ranked list',
+      { scored: 2, ranked: 0, topScore: null },
+    );
     expect(agentStageStatus('scorer', 'Scored ', run('completed'), [
-      scorerInfo,
-      stageEvent('scorer', 'warning', 'No buyer intent or competitor complaint signals in this run'),
-    ])).toBe('Completed with warnings');
+      noRankedScorerInfo,
+      stageEvent('scorer', 'info', 'No buyer intent or competitor complaint signals in this run'),
+    ])).toBe('Completed');
     expect(agentStageStatus('enricher', 'Enriched ', run('completed'), [
       stageEvent('enricher', 'error', 'Enrichment failed'),
     ])).toBe('Running');

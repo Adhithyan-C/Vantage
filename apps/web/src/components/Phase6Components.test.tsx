@@ -38,8 +38,21 @@ describe('Phase 6 server-rendered components', () => {
     const buyer = renderToString(<SignalCard signal={ranked} runId="run" />);
     expect(noise).toContain('Not ranked');
     expect(noise).not.toContain('Score 99');
+    expect(noise).not.toContain('Rank 1');
+    expect(buyer).toContain('Rank <!-- -->1');
     expect(buyer).toContain('Score');
     expect(buyer).toContain('63');
+  });
+
+  it('shows evidence verification wording only when confidence is present', () => {
+    const verified = renderToString(<SignalCard signal={{ ...ranked, confidence: 1 }} runId="run" />);
+    const partial = renderToString(<SignalCard signal={{ ...ranked, confidence: 0.8 }} runId="run" />);
+    const unknown = renderToString(<SignalCard signal={{ ...ranked, confidence: null }} runId="run" />);
+    expect(verified).toContain('Quotes verified');
+    expect(partial).toContain('Some quotes could not be verified');
+    expect(unknown).not.toContain('Evidence check');
+    expect(unknown).not.toContain('Quotes verified');
+    expect(unknown).not.toContain('Some quotes could not be verified');
   });
 
   it('renders score rows and total only for ranked signals', () => {

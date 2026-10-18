@@ -187,10 +187,10 @@ export async function runPipeline(
             `${summary.failed} signal(s) could not be classified (${reason})`,
           );
         }
-        const classifiedTotal = summary.classified + summary.reused;
-        if (deps.score && classifiedTotal > 0) {
-          await emit.progress('enricher', `Enriching ${classifiedTotal} classified signal(s)`, {
-            total: classifiedTotal,
+        const classified = summary.classified;
+        if (deps.score && classified > 0) {
+          await emit.progress('enricher', `Enriching ${classified} classified signal(s)`, {
+            total: classified,
           });
           try {
             const scoreSummary = await deps.score(runId);
@@ -210,7 +210,7 @@ export async function runPipeline(
               },
             );
             if (scoreSummary.ranked === 0) {
-              await emit.warning(
+              await emit.info(
                 'scorer',
                 'No buyer intent or competitor complaint signals in this run',
               );
