@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { loadEnv } from '../src/config/env.js';
+import { parseProviderOrder } from '../src/config/llm';
 
 describe('loadEnv', () => {
   it('when REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are given along with the 4 required variables, loadEnv returns them', () => {
@@ -26,14 +27,15 @@ describe('loadEnv', () => {
     expect(env.DEMO_MODE).toBe(false);
   });
 
-  it('GEMINI_API_KEY missing: throws an error whose message contains GEMINI_API_KEY', () => {
-    expect(() => {
-      loadEnv({
-        SUPABASE_URL: 'x',
-        SUPABASE_SERVICE_ROLE_KEY: 'x',
-        REDDIT_USER_AGENT: 'x'
-      });
-    }).toThrow(/GEMINI_API_KEY/);
+  it('allows a Groq-only configuration without a Gemini API key', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      GROQ_API_KEY: 'groq-key',
+    });
+    expect(env.GEMINI_API_KEY).toBeUndefined();
+    expect(env.GROQ_API_KEY).toBe('groq-key');
   });
 
   it('GROQ_API_KEY set to an empty string: does not throw', () => {
@@ -67,5 +69,42 @@ describe('loadEnv', () => {
       PORT: '4000'
     });
     expect(env.PORT).toBe(4000);
+  });
+
+  it('accepts model overrides and a configured provider order', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      GEMINI_API_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      GEMINI_MODEL: 'gemini-custom',
+      GROQ_MODEL: 'groq-custom',
+      LLM_PROVIDER_ORDER: 'gemini,groq',
+    });
+    expect(env.GEMINI_MODEL).toBe('gemini-custom');
+    expect(env.GROQ_MODEL).toBe('groq-custom');
+    expect(parseProviderOrder(env.LLM_PROVIDER_ORDER)).toEqual(['gemini', 'groq']);
+  });
+
+  it('treats empty model and provider-order values as unset', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      GEMINI_API_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      GEMINI_MODEL: ' ',
+      GROQ_MODEL: '',
+      LLM_PROVIDER_ORDER: '  ',
+    });
+    expect(env.GEMINI_MODEL).toBeUndefined();
+    expect(env.GROQ_MODEL).toBeUndefined();
+    expect(env.LLM_PROVIDER_ORDER).toBeUndefined();
+    expect(parseProviderOrder(env.LLM_PROVIDER_ORDER)).toEqual(['groq', 'gemini']);
+  });
+
+  it('drops unknown providers and falls back to Groq then Gemini when none are valid', () => {
+    expect(parseProviderOrder('unknown,gemini,wrong')).toEqual(['gemini']);
+    expect(parseProviderOrder('unknown,wrong')).toEqual(['groq', 'gemini']);
+    expect(parseProviderOrder('groq,groq,gemini')).toEqual(['groq', 'gemini']);
   });
 });

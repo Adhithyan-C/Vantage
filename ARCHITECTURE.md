@@ -930,3 +930,49 @@ Exports: `geminiModel`, `groqModel`, temperature 0, requestTimeoutMs 30000, maxV
 
 ### 21.10 Files
 packages/shared/src/types.ts (DecisionView), config/llm.ts, llm/client.ts, llm/prompts/classifier.v1.ts, verification/verifyQuote.ts, agents/classifier.ts, db/decisions.ts, orchestrator/runPipeline.ts, routes/runs.ts, index.ts, web PipelineProgress.tsx and RunPage.tsx, plus tests.
+
+---
+
+## 22. Phase 4.1: Classifier resilience, failure reasons, provider configuration, and circuit breaker
+
+These rules amend Phase 4. Use Groq before Gemini by default because the current account returns HTTP 404 for `gemini-2.5-flash`.
+
+### 22.1 Failure reasons
+
+A failed `LlmResult` includes `providerErrors: Array<{ provider: 'gemini' | 'groq'; status: number | null; message: string }>` with an entry for each failed provider request attempt. Messages come from the provider error-body message field or exception text, are limited to 200 characters, redact configured API key values and every `AIza[0-9A-Za-z_-]{20,}` or `gsk_[0-9A-Za-z]+` secret, and never contain prompts or post text. Failed decision output is `{ error: { providers: providerErrors } }`, retaining status `error` or `invalid_output`. `ClassifySummary.failureReasons` counts keys `provider:status`, using `none` for a null status. Pipeline event counts include these counts. The failure warning is `${failed} signal(s) could not be classified (${reason})`, with the most frequent reason rendered as human-readable text (for example `groq HTTP 429`, `gemini HTTP 404`, or `gemini network error`). Ties are deterministic.
+
+### 22.2 Provider fallback
+
+Fall through to the next eligible provider in `providerOrder` on any non-2xx response, network error, timeout, empty reply, or blocked reply. If all available providers fail, return a failure containing their recorded provider errors. This supersedes narrower fallback rules in earlier sections.
+
+### 22.3 Rate limits and configuration
+
+For HTTP 429 and 503, retry the same provider before falling through. Allow at most two retries per provider per call. On a numeric `Retry-After`, wait seconds converted to milliseconds; otherwise wait 2000 ms then 4000 ms. Cap all waits at 20000 ms. Inject `sleep(ms)` into the client for tests. Add `rateLimitRetries: 2` and `retryAfterCapMs: 20000` to LLM configuration. Set classifier concurrency to 1 and `maxPostChars` to 2000. Reconcile retries, fallback, and failure recording.
+
+### 22.4 Prompt v2
+
+Set `promptVersion` to `classifier.v2`, create `apps/api/src/llm/prompts/classifier.v2.ts`, switch all relevant imports and references, move v1 prompt tests to v2, and delete `classifier.v1.ts`. Preserve the v1 prompt behavior and injection defenses. Refine label definitions: venting is frustration/complaints about customer support, helpdesk or ticketing tools, support workflows, or a seller-profile competitor; frustration about other topics (including AI debates, politics, engineering management, or general software complaints) is noise; vendors/founders/makers promoting their own product are noise even if it is a competitor or alternative; a passing competitor mention without evaluation, complaint, or request is noise; buyer intent requires looking for, comparing, or asking about tools or approaches in the seller's problem area.
+
+### 22.5 LLM diagnostic command
+
+Add root `npm run llm:check`, forwarding to `apps/api/src/scripts/llm-check.ts` through the API workspace script. Load the root `.env` as in `index.ts`, build the real LLM client from environment configuration, and issue exactly one tiny `{ ok: boolean }` schema request per configured provider using a prompt asking for `{"ok": true}`. Print one sanitized provider/model result per configured provider, `not configured` for absent keys, the effective provider order, and disabled providers. Never print keys, headers, prompts, post text, or unsanitized errors. Exit 1 when no provider succeeds. Add no packages.
+
+### 22.6 Web: Scout badge
+
+In `PipelineProgress`, Scout status is independent of the run-level page-header badge. Display `Running` until a scout event with `counts.afterDedupe` exists or the run is no longer running. After that event display `Completed`, unless a source is `degraded`, `failed`, or `skipped`, in which case show `Completed with warnings`; show `Failed` if every source failed. Keep the header badge tied to `run.status`.
+
+### 22.7 Files and scope
+
+Intended files: `config/llm.ts`, `llm/client.ts`, `llm/prompts/classifier.v2.ts` (delete v1), `agents/classifier.ts`, `db/decisions.ts`, `orchestrator/runPipeline.ts`, `scripts/llm-check.ts`, both root and API `package.json` (script entries only), web `PipelineProgress.tsx`, and relevant tests. Additional authorized files: `apps/api/src/config/env.ts`, `apps/api/test/env.test.ts`, and `.env.example`. No unrelated changes.
+
+### 22.8 Provider order, model overrides, and circuit breaker
+
+Default/exported `providerOrder` is Groq then Gemini. Optional `LLM_PROVIDER_ORDER` accepts comma-separated `groq` and `gemini`; drop unknowns and use the default if no valid names remain. Skip providers without keys. The same effective order governs the client, retries/fallback, diagnostic, and tests. Optional non-empty `GEMINI_MODEL` and `GROQ_MODEL` override configured model IDs; empty values are unset. Extend the environment schema and `.env.example` with `GEMINI_MODEL=`, `GROQ_MODEL=`, and `LLM_PROVIDER_ORDER=`; selected models must be used in provider requests.
+
+For HTTP 404, 401, or 403, disable that provider for the client/process lifetime; later calls skip it. Log one warning per trip, exactly `LLM provider <name> disabled after HTTP <status>`, containing no sensitive content. Do not trip on 429, 5xx, timeout, or network errors. A breaker status must not be retried as rate limiting; continue to the next provider. When all providers are disabled, return `{ ok: false, kind: 'error' }` with stored provider errors. Expose disabled-provider state to the diagnostic without secrets.
+
+### 22.9 Tests
+
+Use injected fakes only: no real network/database or module mocks. Verify default/reversed/invalid provider order, model overrides in actual requests, missing-key skipping, empty env values, and order parsing. Verify 404/401/403 trip breakers, later calls make no further request to disabled providers, each trip warns once with the exact safe text, and 429/503/500/network/timeout do not trip. Verify continuing enabled providers and all-disabled errors with provider errors.
+
+Client tests cover 403 and network fallback, numeric and fallback retry delays, three 429 attempts then fallback, 20-second cap, sanitized error messages including echoed configured and regex-matched keys, one error per failed request with correct status, 429/503 retry before fallback, other non-2xx no retry, empty/blocked fallback, and model/order/key behavior. Classifier tests verify failure output `{ error: { providers } }`, status, mixed `failureReasons`, and absence of prompt/post text. Pipeline tests verify most-frequent reason formatting, HTTP/null reason rendering, event counts, deterministic ties, and updated warning text. Prompt tests verify v2, refined labels, preserved injection defenses and delimiters, and all imports use v2. Environment tests cover the three optional variables, overrides, empty values, unknown names, and default fallback. Scout badge tests cover running/completed/warnings/all-failed states and preserve the header run badge.

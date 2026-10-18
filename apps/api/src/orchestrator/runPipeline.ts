@@ -40,6 +40,24 @@ function eventKindFor(status: SourceStatus): 'info' | 'warning' | 'error' {
   return 'warning';
 }
 
+export function formatFailureReason(reasonKey: string): string {
+  const separator = reasonKey.lastIndexOf(':');
+  const provider = separator < 0 ? 'unknown' : reasonKey.slice(0, separator);
+  const status = separator < 0 ? 'none' : reasonKey.slice(separator + 1);
+  if (status === 'none') {
+    return provider === 'none' ? 'network error' : `${provider} network error`;
+  }
+  return provider === 'none' ? `HTTP ${status}` : `${provider} HTTP ${status}`;
+}
+
+function mostFrequentFailureReason(failureReasons: Record<string, number>): string {
+  const sorted = Object.entries(failureReasons).sort(
+    ([leftKey, leftCount], [rightKey, rightCount]) =>
+      rightCount - leftCount || leftKey.localeCompare(rightKey),
+  );
+  return sorted[0] ? formatFailureReason(sorted[0][0]) : 'unknown error';
+}
+
 export async function runPipeline(
   deps: PipelineDeps,
   runId: string,
@@ -155,11 +173,16 @@ export async function runPipeline(
             noise,
             verifiedQuotes: summary.verifiedQuotes,
             droppedQuotes: summary.droppedQuotes,
+            failureReasons: summary.failureReasons,
           },
         );
         if (summary.failed > 0) {
           classificationFailed = true;
-          await emit.warning('classifier', `${summary.failed} signal(s) could not be classified`);
+          const reason = mostFrequentFailureReason(summary.failureReasons);
+          await emit.warning(
+            'classifier',
+            `${summary.failed} signal(s) could not be classified (${reason})`,
+          );
         }
       }
     }

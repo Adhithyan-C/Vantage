@@ -4,8 +4,8 @@ import type {
   LeadLabel,
   SellerProfileInput,
 } from '@vantage/shared';
-import type { LlmClient, LlmResult } from '../llm/client';
-import { buildClassifierPrompt } from '../llm/prompts/classifier.v1';
+import type { LlmClient, LlmResult, ProviderError } from '../llm/client';
+import { buildClassifierPrompt } from '../llm/prompts/classifier.v2';
 import { RUBRIC } from '../config/rubric';
 import type { DecisionRow, DecisionStore, RunSignalContext } from '../db/decisions';
 import { contentHash } from '../utils/hash';
@@ -27,6 +27,7 @@ export interface ClassifySummary {
   verifiedQuotes: number;
   droppedQuotes: number;
   capped: boolean;
+  failureReasons: Record<string, number>;
 }
 
 export type ClassifyProgress = (done: number, total: number) => void | Promise<void>;
@@ -76,6 +77,7 @@ function emptyDecision(
   promptVersion: string,
   status: 'invalid_output' | 'error',
   model: string | null,
+  providerErrors: ProviderError[],
 ): DecisionRow {
   return {
     runId,
@@ -84,11 +86,22 @@ function emptyDecision(
     model,
     promptVersion,
     inputHash,
-    output: {},
+    output: { error: { providers: providerErrors } },
     evidence: [],
     evidenceVerified: false,
     status,
   };
+}
+
+function recordFailureReasons(summary: ClassifySummary, providerErrors: ProviderError[]): void {
+  if (providerErrors.length === 0) {
+    summary.failureReasons['none:none'] = (summary.failureReasons['none:none'] ?? 0) + 1;
+    return;
+  }
+  for (const error of providerErrors) {
+    const key = `${error.provider}:${error.status ?? 'none'}`;
+    summary.failureReasons[key] = (summary.failureReasons[key] ?? 0) + 1;
+  }
 }
 
 export function createClassifyStage({ llm, store, config }: ClassifyStageOptions): ClassifyStage {
@@ -107,6 +120,7 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
       verifiedQuotes: 0,
       droppedQuotes: 0,
       capped: signals.length > selected.length,
+      failureReasons: {},
     };
     let cursor = 0;
     let done = 0;
@@ -146,9 +160,18 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
         });
         if (!result.ok) {
           await store.saveDecision(
-            emptyDecision(runId, signal.id, inputHash, config.promptVersion, result.kind, result.model),
+            emptyDecision(
+              runId,
+              signal.id,
+              inputHash,
+              config.promptVersion,
+              result.kind,
+              result.model,
+              result.providerErrors,
+            ),
           );
           summary.failed += 1;
+          recordFailureReasons(summary, result.providerErrors);
           return;
         }
 
@@ -174,9 +197,10 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
         );
       } catch {
         summary.failed += 1;
+        recordFailureReasons(summary, []);
         try {
           await store.saveDecision(
-            emptyDecision(runId, signal.id, inputHash, config.promptVersion, 'error', null),
+            emptyDecision(runId, signal.id, inputHash, config.promptVersion, 'error', null, []),
           );
         } catch {
           // A database failure should not prevent remaining signals from being classified.

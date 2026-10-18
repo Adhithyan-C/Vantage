@@ -54,6 +54,29 @@ function scoutSummary(events: RunEvent[]): string {
   return parts.join(' · ');
 }
 
+export function scoutStatus(run: RunView, events: RunEvent[]): string {
+  const hasResult = events.some(
+    (event) => event.agent === 'scout' && typeof event.counts?.afterDedupe === 'number',
+  );
+  const allFailed = run.sources.length > 0 && run.sources.every((source) => source.status === 'failed');
+  if (allFailed) {
+    return 'Failed';
+  }
+  const hasWarningSource = run.sources.some(
+    (source) => source.status === 'degraded' || source.status === 'failed' || source.status === 'skipped',
+  );
+  if (run.status === 'running' && !hasResult) {
+    return 'Running';
+  }
+  if (hasWarningSource) {
+    return 'Completed with warnings';
+  }
+  if (hasResult || run.status !== 'running') {
+    return run.status === 'failed' ? 'Failed' : 'Completed';
+  }
+  return 'Running';
+}
+
 function classifierStatus(run: RunView, events: RunEvent[]): string {
   const classifierEvents = events.filter((event) => event.agent === 'classifier');
   if (classifierEvents.length === 0) {
@@ -86,6 +109,7 @@ function classifierSummary(events: RunEvent[]): string {
 
 export function PipelineProgress({ run, events }: { run: RunView; events: RunEvent[] }) {
   const summary = scoutSummary(events);
+  const scoutBadge = scoutStatus(run, events);
   const classifierInfo = classifierSummary(events);
   const classifierBadge = classifierStatus(run, events);
 
@@ -105,7 +129,9 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
                 <p className="stage-summary">{classifierInfo}</p>
               )}
             </div>
-            {stage.id === 'classifier' ? (
+            {stage.id === 'scout' ? (
+              <span className="badge badge-planned">{scoutBadge}</span>
+            ) : stage.id === 'classifier' ? (
               <span className="badge badge-planned">{classifierBadge}</span>
             ) : stage.built ? (
               <RunStatusBadge status={run.status} />

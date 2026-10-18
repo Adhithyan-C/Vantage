@@ -49,6 +49,7 @@ const summary: ClassifySummary = {
   verifiedQuotes: 1,
   droppedQuotes: 0,
   capped: false,
+  failureReasons: {},
 };
 
 function deps(store: PipelineStore, classify?: PipelineDeps['classify'], result: AdapterResult = { signals: [signal], status: 'ok' }): PipelineDeps {
@@ -81,6 +82,7 @@ describe('runPipeline classifier integration', () => {
           noise: 0,
           verifiedQuotes: 1,
           droppedQuotes: 0,
+          failureReasons: {},
         },
       },
     ]);
@@ -90,8 +92,14 @@ describe('runPipeline classifier integration', () => {
 
   it('marks a successful-source run completed with warnings when classification has failures', async () => {
     const store = new PipelineStore();
-    await runPipeline(deps(store, async () => ({ ...summary, failed: 2 })), 'run-1', params);
-    expect(store.events.some((event) => event.message === '2 signal(s) could not be classified')).toBe(true);
+    await runPipeline(deps(store, async () => ({
+      ...summary,
+      failed: 2,
+      failureReasons: { 'groq:429': 2, 'gemini:none': 1 },
+    })), 'run-1', params);
+    expect(store.events.some((event) => event.message === '2 signal(s) could not be classified (groq HTTP 429)')).toBe(true);
+    expect(store.events.find((event) => event.agent === 'classifier' && event.kind === 'info')?.counts)
+      .toMatchObject({ failureReasons: { 'groq:429': 2, 'gemini:none': 1 } });
     expect(store.statuses).toEqual(['completed_with_warnings']);
   });
 
@@ -111,5 +119,29 @@ describe('runPipeline classifier integration', () => {
     }, { signals: [], status: 'ok' }), 'run-1', params);
     expect(called).toBe(false);
     expect(store.events.some((event) => event.agent === 'classifier')).toBe(false);
+  });
+
+  it.each([
+    ['gemini:404', 'gemini HTTP 404'],
+    ['groq:none', 'groq network error'],
+    ['none:none', 'network error'],
+  ])('formats the failure reason %s', async (key, expected) => {
+    const store = new PipelineStore();
+    await runPipeline(deps(store, async () => ({
+      ...summary,
+      failed: 1,
+      failureReasons: { [key]: 1 },
+    })), 'run-1', params);
+    expect(store.events.some((event) => event.message === `1 signal(s) could not be classified (${expected})`)).toBe(true);
+  });
+
+  it('breaks equal failure-reason counts in sorted-key order', async () => {
+    const store = new PipelineStore();
+    await runPipeline(deps(store, async () => ({
+      ...summary,
+      failed: 1,
+      failureReasons: { 'groq:429': 1, 'gemini:404': 1 },
+    })), 'run-1', params);
+    expect(store.events.some((event) => event.message === '1 signal(s) could not be classified (gemini HTTP 404)')).toBe(true);
   });
 });

@@ -26,10 +26,10 @@ Seller problem: ${seller.problemDescription}
 Seller competitors: ${seller.competitors.join(', ') || '(none)'}
 
 Labels:
-- buyer_intent: the author is looking for or evaluating a solution to the problem the seller solves, or asks for alternatives.
+- buyer_intent: the author is looking for, comparing, or asking about tools or approaches in the seller's problem area.
 - competitor_complaint: the author criticises a competitor named in the seller profile.
-- venting: frustration with no search for a solution.
-- noise: anything else, including vendors promoting their own product, news, and unrelated mentions of a keyword.
+- venting: frustration or complaints about customer support, helpdesk or ticketing tools, support workflows, or a competitor explicitly named in the seller profile.
+- noise: anything else. Frustration about other topics, including AI debates, politics, engineering management, or general software complaints, is noise. A vendor, founder, or maker promoting or announcing their own product is noise, even if it is a competitor or alternative. A passing mention of a competitor without evaluation, complaint, or request is noise.
 
 Rubric criteria:
 ${rubric}

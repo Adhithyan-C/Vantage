@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "scout": "tsx src/scripts/scout-cli.ts"
+    "scout": "tsx src/scripts/scout-cli.ts",
+    "llm:check": "tsx src/scripts/llm-check.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.117.2",

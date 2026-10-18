@@ -20,7 +20,7 @@ const expectedDecision: DecisionView = {
   criteria: [{ id: 'states_problem', passed: true, quote: 'support issue' }],
   evidenceVerified: true,
   model: 'gemini-2.5-flash',
-  promptVersion: 'classifier.v1',
+  promptVersion: 'classifier.v2',
   status: 'ok',
 };
 

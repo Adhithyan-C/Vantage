@@ -10,7 +10,7 @@ const seller = {
   problemDescription: 'Help support teams manage customer tickets.',
   competitors: ['Zendesk'],
 };
-const config = { concurrency: 2, maxClassifyPerRun: 30, maxPostChars: 4_000, promptVersion: 'classifier.v1' };
+const config = { concurrency: 1, maxClassifyPerRun: 30, maxPostChars: 2_000, promptVersion: 'classifier.v2' };
 const output: ClassifierOutput = { label: 'noise', criteria: [], rationale: 'Unrelated post.' };
 
 function signal(index: number): RunSignalContext {
@@ -47,7 +47,7 @@ function llmFor(
     model: 'test-model',
     attempts: 1,
   }),
-): LlmClient {
+): Pick<LlmClient, 'generateJson'> {
   return {
     async generateJson<T>(): Promise<LlmResult<T>> {
       return (await generate()) as LlmResult<T>;
@@ -86,13 +86,20 @@ describe('createClassifyStage', () => {
   it('reuses matching cached output and saves a copy for the current run', async () => {
     const reusable = {
       model: 'cached-model',
-      promptVersion: 'classifier.v1',
+      promptVersion: 'classifier.v2',
       output: { label: 'venting', criteria: [], rationale: 'Cached result.' },
       evidence: [],
       evidenceVerified: true,
     };
     const { store, saved } = storeFor(context(1), reusable);
-    const llm = llmFor(async () => ({ ok: false, kind: 'error', error: 'should not run', model: null, attempts: 0 }));
+    const llm = llmFor(async () => ({
+      ok: false,
+      kind: 'error',
+      error: 'should not run',
+      model: null,
+      attempts: 0,
+      providerErrors: [],
+    }));
     const summary = await createClassifyStage({ llm, store, config })('new-run');
     expect(summary).toMatchObject({ classified: 1, reused: 1, failed: 0, labels: { venting: 1 } });
     expect(saved[0]).toMatchObject({ runId: 'new-run', model: 'cached-model', output: reusable.output });
@@ -104,13 +111,58 @@ describe('createClassifyStage', () => {
     const llm = llmFor(async () => {
       calls += 1;
       return calls === 1
-        ? { ok: false, kind: 'error', error: 'provider failed', model: null, attempts: 2 }
+        ? {
+          ok: false,
+          kind: 'error',
+          error: 'provider failed',
+          model: null,
+          attempts: 2,
+          providerErrors: [
+            { provider: 'groq', status: 429, message: 'rate limited' },
+            { provider: 'gemini', status: 503, message: 'unavailable' },
+          ],
+        }
         : { ok: true, data: output, model: 'test-model', attempts: 1 };
     });
     const summary = await createClassifyStage({ llm, store, config })('run-1');
     expect(summary).toMatchObject({ classified: 1, failed: 1 });
     expect(saved.some((row) => row.status === 'error')).toBe(true);
     expect(saved.some((row) => row.status === 'ok')).toBe(true);
+    expect(saved.find((row) => row.status === 'error')?.output).toEqual({
+      error: {
+        providers: [
+          { provider: 'groq', status: 429, message: 'rate limited' },
+          { provider: 'gemini', status: 503, message: 'unavailable' },
+        ],
+      },
+    });
+    expect(summary.failureReasons).toEqual({ 'groq:429': 1, 'gemini:503': 1 });
+    expect(JSON.stringify(saved.find((row) => row.status === 'error')?.output)).not.toContain('post-');
+    expect(JSON.stringify(saved.find((row) => row.status === 'error')?.output)).not.toContain('Seller product');
+  });
+
+  it('saves invalid-output provider reasons and preserves the invalid_output status', async () => {
+    const { store, saved } = storeFor(context(1));
+    const llm = llmFor(async () => ({
+      ok: false,
+      kind: 'invalid_output',
+      error: 'invalid output',
+      model: 'groq-model',
+      attempts: 3,
+      providerErrors: [
+        { provider: 'groq', status: 200, message: 'Provider returned invalid JSON' },
+      ],
+    }));
+    const summary = await createClassifyStage({ llm, store, config })('run-1');
+    expect(summary).toMatchObject({ failed: 1, failureReasons: { 'groq:200': 1 } });
+    expect(saved[0]).toMatchObject({
+      status: 'invalid_output',
+      output: {
+        error: {
+          providers: [{ provider: 'groq', status: 200, message: 'Provider returned invalid JSON' }],
+        },
+      },
+    });
   });
 
   it('calls the progress callback every ten signals', async () => {
