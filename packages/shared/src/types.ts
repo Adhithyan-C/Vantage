@@ -68,3 +68,19 @@ export interface RunEvent {
   counts: Record<string, unknown> | null;
   createdAt: string;
 }
+
+export interface DecisionView {
+  signalId: string;
+  source: SourceId;
+  url: string;
+  authorHandle: string;
+  createdAtSource: string;
+  textPreview: string;
+  label: LeadLabel | null;
+  rationale: string;
+  criteria: Array<{ id: CriterionId; passed: boolean; quote: string | null }>;
+  evidenceVerified: boolean;
+  model: string | null;
+  promptVersion: string | null;
+  status: (typeof import('./constants').DECISION_STATUSES)[number];
+}

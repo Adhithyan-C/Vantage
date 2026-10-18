@@ -2,8 +2,12 @@ import express from 'express';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { getEnv } from './config/env';
+import { LLM_CONFIG } from './config/llm';
+import { createClassifyStage } from './agents/classifier';
+import { createDecisionStore } from './db/decisions';
 import { createDb } from './db/client';
 import { createRunStore } from './db/runs';
+import { createLlmClient } from './llm/client';
 import { createRunsRouter } from './routes/runs';
 import { defaultAdapterContext, getEnabledAdapters } from './sources/index';
 
@@ -17,6 +21,20 @@ async function main(): Promise<void> {
   const env = getEnv();
   const db = createDb(env);
   const store = createRunStore(db);
+  let decisionStore: ReturnType<typeof createDecisionStore> | undefined;
+  let classify: ReturnType<typeof createClassifyStage> | undefined;
+  try {
+    const llm = createLlmClient({
+      fetch: globalThis.fetch,
+      geminiApiKey: env.GEMINI_API_KEY,
+      groqApiKey: env.GROQ_API_KEY,
+      config: LLM_CONFIG,
+    });
+    decisionStore = createDecisionStore(db);
+    classify = createClassifyStage({ llm, store: decisionStore, config: LLM_CONFIG });
+  } catch (err) {
+    console.warn(`Warning: classifier is unavailable: ${errorMessage(err)}`);
+  }
 
   try {
     const stale = await store.failStaleRuns();
@@ -39,6 +57,8 @@ async function main(): Promise<void> {
       store,
       adapters: getEnabledAdapters(),
       ctx: defaultAdapterContext(),
+      classify,
+      decisionStore,
     }),
   );
 

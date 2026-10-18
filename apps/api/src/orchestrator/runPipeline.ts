@@ -2,12 +2,15 @@ import type { RunParams, RunStatus, SourceStatus } from '@vantage/shared';
 import type { RunStore } from '../db/runs';
 import type { SourceAdapter, AdapterContext } from '../sources/types';
 import { runScout } from '../agents/scout';
+import type { ClassifyStage, ClassifySummary } from '../agents/classifier';
+import { maxClassifyPerRun } from '../config/llm';
 import { createEmitter } from './events';
 
 export interface PipelineDeps {
   store: RunStore;
   adapters: SourceAdapter[];
   ctx: AdapterContext;
+  classify?: ClassifyStage;
 }
 
 export function computeRunStatus(reports: Array<{ status: SourceStatus }>): RunStatus {
@@ -117,7 +120,54 @@ export async function runPipeline(
       );
     }
 
-    const status = computeRunStatus(result.sources);
+    let classificationFailed = false;
+    if (deps.classify && result.afterDedupe > 0) {
+      await emit.progress('classifier', `Classifying ${result.afterDedupe} signal(s)`, {
+        total: result.afterDedupe,
+      });
+      if (result.afterDedupe > maxClassifyPerRun) {
+        await emit.warning(
+          'classifier',
+          `Classifying the newest ${maxClassifyPerRun} of ${result.afterDedupe} signals`,
+        );
+      }
+      let summary: ClassifySummary | null = null;
+      try {
+        summary = await deps.classify(runId, async (done, total) => {
+          await emit.progress('classifier', `Classified ${done} of ${total}`);
+        });
+      } catch (err) {
+        classificationFailed = true;
+        await emit.error('classifier', `Classification failed: ${errorMessage(err)}`);
+      }
+      if (summary) {
+        const { buyer_intent, competitor_complaint, venting, noise } = summary.labels;
+        await emit.info(
+          'classifier',
+          `Classified ${summary.classified} signal(s): ${buyer_intent} buyer intent, ${competitor_complaint} competitor complaint, ${venting} venting, ${noise} noise`,
+          {
+            classified: summary.classified,
+            reused: summary.reused,
+            failed: summary.failed,
+            buyer_intent,
+            competitor_complaint,
+            venting,
+            noise,
+            verifiedQuotes: summary.verifiedQuotes,
+            droppedQuotes: summary.droppedQuotes,
+          },
+        );
+        if (summary.failed > 0) {
+          classificationFailed = true;
+          await emit.warning('classifier', `${summary.failed} signal(s) could not be classified`);
+        }
+      }
+    }
+
+    const sourceStatus = computeRunStatus(result.sources);
+    const status = sourceStatus === 'completed' && classificationFailed
+      ? 'completed_with_warnings'
+      : sourceStatus;
     await store.setRunStatus(runId, status, true);
 
     const counts = { signals: result.afterDedupe };

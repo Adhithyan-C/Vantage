@@ -1,6 +1,8 @@
 import express from 'express';
 import { RunCreateRequestSchema } from '@vantage/shared';
+import type { DecisionView } from '@vantage/shared';
 import { DEMO_RUN_PARAMS, loadDemoSeller } from '../config/demo';
+import type { DecisionStore } from '../db/decisions';
 import { runPipeline } from '../orchestrator/runPipeline';
 import type { PipelineDeps } from '../orchestrator/runPipeline';
 
@@ -10,7 +12,9 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export function createRunsRouter(deps: PipelineDeps): express.Router {
+export function createRunsRouter(
+  deps: PipelineDeps & { decisionStore?: DecisionStore },
+): express.Router {
   const router = express.Router();
   const { store } = deps;
 
@@ -88,6 +92,25 @@ export function createRunsRouter(deps: PipelineDeps): express.Router {
       res.status(200).json({ events });
     } catch (err) {
       console.error(`GET /runs/:runId/events failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  router.get('/runs/:runId/decisions', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      if (!deps.decisionStore) {
+        res.status(500).json({ error: 'Internal error' });
+        return;
+      }
+      const decisions: DecisionView[] = await deps.decisionStore.listDecisions(runId);
+      res.status(200).json({ decisions });
+    } catch (err) {
+      console.error(`GET /runs/:runId/decisions failed: ${errorMessage(err)}`);
       res.status(500).json({ error: 'Internal error' });
     }
   });
