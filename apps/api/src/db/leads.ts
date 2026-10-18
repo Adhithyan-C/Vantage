@@ -9,12 +9,15 @@ import type {
   CriterionId,
   Enrichment,
   LeadLabel,
+  LeadDetail,
   LeadView,
+  FeedbackAction,
   RawSignal,
   ScoreBreakdown,
   SellerProfileInput,
   SourceId,
 } from '@vantage/shared';
+import { findEvidenceSpans } from '../verification/verifyQuote';
 
 export interface ScoringContextItem {
   signal: string;
@@ -48,6 +51,9 @@ export interface LeadStore {
   getScoringContext(runId: string): Promise<ScoringContext>;
   saveLeads(runId: string, rows: LeadUpsertRow[]): Promise<void>;
   listLeads(runId: string, includeAll: boolean): Promise<LeadView[]>;
+  getLeadDetail(leadId: string): Promise<LeadDetail | null>;
+  setLeadStatus(leadId: string, status: 'new' | 'accepted' | 'rejected'): Promise<boolean>;
+  addFeedback(leadId: string, action: FeedbackAction): Promise<void>;
 }
 
 function dbError(method: string, error: { message: string }): Error {
@@ -56,6 +62,11 @@ function dbError(method: string, error: { message: string }): Error {
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+}
+
+function isCriterionId(value: unknown): value is CriterionId {
+  return value === 'states_problem' || value === 'asks_for_recommendation' ||
+    value === 'mentions_team_or_budget' || value === 'shows_urgency' || value === 'names_competitor';
 }
 
 function parseEnrichment(value: unknown): Enrichment | null {
@@ -326,6 +337,125 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
           enrichment,
         }];
       });
+    },
+
+    async getLeadDetail(leadId) {
+      const { data: lead, error: leadError } = await db
+        .from('leads')
+        .select('id, run_id, signal_id, label, score, score_breakdown, rank, status')
+        .eq('id', leadId)
+        .maybeSingle();
+      if (leadError) {
+        throw dbError('getLeadDetail', leadError);
+      }
+      if (!lead) {
+        return null;
+      }
+      const { data: signal, error: signalError } = await db
+        .from('signals')
+        .select('id, source, url, author_handle, community, created_at_source, text_snapshot')
+        .eq('id', lead.signal_id)
+        .maybeSingle();
+      if (signalError) {
+        throw dbError('getLeadDetail', signalError);
+      }
+      const { data: decision, error: decisionError } = await db
+        .from('decisions')
+        .select('model, prompt_version, created_at, status, output')
+        .eq('run_id', lead.run_id)
+        .eq('signal_id', lead.signal_id)
+        .eq('agent', 'classifier')
+        .eq('status', 'ok')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (decisionError) {
+        throw dbError('getLeadDetail', decisionError);
+      }
+      if (!signal || !decision) {
+        return null;
+      }
+      const label = lead.label;
+      const status = lead.status;
+      const storedBreakdown = asRecord(lead.score_breakdown);
+      const breakdown = ScoreBreakdownSchema.safeParse({
+        components: storedBreakdown.components,
+        total: storedBreakdown.total,
+      });
+      const enrichment = parseEnrichment(storedBreakdown.enrichment);
+      const output = asRecord(decision.output);
+      const classifierOutput = parseClassifierOutput(output);
+      if (
+        (label !== 'buyer_intent' && label !== 'competitor_complaint' && label !== 'venting' && label !== 'noise') ||
+        (status !== 'new' && status !== 'accepted' && status !== 'rejected') ||
+        !breakdown.success || !enrichment || !classifierOutput ||
+        !SOURCE_IDS.includes(signal.source as SourceId)
+      ) {
+        return null;
+      }
+      const notes = asRecord(output.notes);
+      const criteria = Array.isArray(output.criteria)
+        ? output.criteria.flatMap((item) => {
+          const row = asRecord(item);
+          if (row.passed !== true || typeof row.quote !== 'string') {
+            return [];
+          }
+          if (!isCriterionId(row.id)) {
+            return [];
+          }
+          return [{ criterion: row.id, quote: row.quote }];
+        })
+        : [];
+      const unverified = Array.isArray(notes.unverified) ? notes.unverified : [];
+      const view: LeadView = {
+        leadId: lead.id as string,
+        signalId: signal.id as string,
+        rank: lead.rank as number,
+        label,
+        score: lead.score as number,
+        confidence: typeof storedBreakdown.confidence === 'number' ? storedBreakdown.confidence : null,
+        status,
+        source: signal.source as SourceId,
+        url: signal.url as string,
+        authorHandle: signal.author_handle as string,
+        community: (signal.community as string | null) ?? null,
+        createdAtSource: signal.created_at_source as string,
+        textPreview: String(signal.text_snapshot ?? '').slice(0, 280),
+        rationale: classifierOutput.rationale,
+        criteria: classifierOutput.criteria,
+        evidenceVerified: decision.status === 'ok',
+        breakdown: breakdown.data,
+        enrichment,
+      };
+      return {
+        lead: view,
+        runId: lead.run_id as string,
+        text: signal.text_snapshot as string,
+        evidence: findEvidenceSpans(signal.text_snapshot as string, criteria),
+        discardedQuotes: unverified.length,
+        trace: {
+          model: typeof decision.model === 'string' ? decision.model : null,
+          promptVersion: typeof decision.prompt_version === 'string' ? decision.prompt_version : null,
+          createdAt: decision.created_at as string,
+          status: decision.status as string,
+          output,
+        },
+      };
+    },
+
+    async setLeadStatus(leadId, status) {
+      const { data, error } = await db.from('leads').update({ status }).eq('id', leadId).select('id');
+      if (error) {
+        throw dbError('setLeadStatus', error);
+      }
+      return (data ?? []).length > 0;
+    },
+
+    async addFeedback(leadId, action) {
+      const { error } = await db.from('feedback').insert({ lead_id: leadId, action });
+      if (error) {
+        throw dbError('addFeedback', error);
+      }
     },
   };
 }

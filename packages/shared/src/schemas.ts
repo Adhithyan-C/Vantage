@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SOURCE_IDS, LEAD_LABELS, CRITERION_IDS, SCORE_COMPONENT_NAMES } from './constants';
+import { SOURCE_IDS, LEAD_LABELS, CRITERION_IDS, SCORE_COMPONENT_NAMES, FEEDBACK_ACTIONS } from './constants';
 
 const isoDate = z.string().refine((v) => !Number.isNaN(Date.parse(v)), { message: 'Must be an ISO 8601 date string' });
 
@@ -54,4 +54,8 @@ export const RunParamsSchema = z.object({
 export const RunCreateRequestSchema = z.object({
   seller: SellerProfileInputSchema,
   params: RunParamsSchema,
+});
+
+export const FeedbackRequestSchema = z.object({
+  action: z.enum(FEEDBACK_ACTIONS),
 });

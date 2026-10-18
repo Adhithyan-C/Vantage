@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ClassifierOutput, CriterionId } from '@vantage/shared';
-import { finalizeClassification, verifyQuote } from '../src/verification/verifyQuote';
+import { findEvidenceSpans, finalizeClassification, normalizeWithMap, verifyQuote } from '../src/verification/verifyQuote';
 
 function rawOutput(
   label: ClassifierOutput['label'] = 'buyer_intent',
@@ -24,6 +24,38 @@ describe('verifyQuote', () => {
 
   it('rejects an empty quote', () => {
     expect(verifyQuote('  ', 'Any non-empty post text')).toBe(false);
+  });
+});
+
+describe('evidence offsets', () => {
+  it('maps curly quotes, dashes, and collapsed whitespace back to the original text', () => {
+    const text = 'Start  \u201cA\n  better\u2014tool\u201d end';
+    const quote = '\u201ca better-tool\u201d';
+    const span = findEvidenceSpans(text, [{ criterion: 'states_problem', quote }])[0];
+    expect(span).toBeDefined();
+    if (!span) return;
+    expect(normalizeWithMap(text.slice(span.start, span.end)).normalized).toBe(normalizeWithMap(quote).normalized);
+  });
+
+  it('finds quotes at the start and end of a post and skips missing quotes', () => {
+    const text = 'Beginning here and ending there';
+    const spans = findEvidenceSpans(text, [
+      { criterion: 'shows_urgency', quote: 'ending there' },
+      { criterion: 'states_problem', quote: 'Beginning here' },
+      { criterion: 'names_competitor', quote: 'not present' },
+    ]);
+    expect(spans.map(({ start, end }) => text.slice(start, end))).toEqual(['Beginning here', 'ending there']);
+    expect(spans.map(({ start }) => start)).toEqual([0, 19]);
+  });
+
+  it('maps a quote spanning a line break and sorts spans by their text position', () => {
+    const text = 'Later text\nFirst line\nSecond line';
+    const spans = findEvidenceSpans(text, [
+      { criterion: 'shows_urgency', quote: 'First line Second line' },
+      { criterion: 'states_problem', quote: 'Later text' },
+    ]);
+    expect(spans.map((span) => span.start)).toEqual([0, 11]);
+    expect(spans.every((span) => normalizeWithMap(text.slice(span.start, span.end)).normalized === normalizeWithMap(span.quote).normalized)).toBe(true);
   });
 });
 

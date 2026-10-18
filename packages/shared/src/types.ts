@@ -16,8 +16,10 @@ import {
   ScoreComponentSchema,
   ScoreBreakdownSchema,
   RunParamsSchema,
-  RunCreateRequestSchema
+  RunCreateRequestSchema,
+  FeedbackRequestSchema
 } from './schemas';
+import type { FEEDBACK_ACTIONS } from './constants';
 
 export type SourceId = (typeof SOURCE_IDS)[number];
 export type LeadLabel = (typeof LEAD_LABELS)[number];
@@ -64,6 +66,33 @@ export interface LeadView {
   evidenceVerified: boolean;
   breakdown: ScoreBreakdown;
   enrichment: Enrichment;
+}
+
+export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
+export type FeedbackAction = (typeof FEEDBACK_ACTIONS)[number];
+
+export interface EvidenceSpan {
+  criterion: CriterionId;
+  quote: string;
+  start: number;
+  end: number;
+}
+
+export interface DecisionTrace {
+  model: string | null;
+  promptVersion: string | null;
+  createdAt: string;
+  status: string;
+  output: Record<string, unknown>;
+}
+
+export interface LeadDetail {
+  lead: LeadView;
+  runId: string;
+  text: string;
+  evidence: EvidenceSpan[];
+  discardedQuotes: number;
+  trace: DecisionTrace;
 }
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type SourceStatus = (typeof SOURCE_STATUSES)[number];

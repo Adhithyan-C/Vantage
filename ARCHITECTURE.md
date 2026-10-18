@@ -1037,4 +1037,50 @@ Golden test values (assert these; use toBeCloseTo with 2 decimals for contributi
 ### 23.9 Files
 packages/shared/src/types.ts, config/scoring.ts, config/enrich.ts, agents/enricher.ts, scoring/computeScore.ts, agents/scorer.ts, db/leads.ts, orchestrator/runPipeline.ts, routes/runs.ts, index.ts, web PipelineProgress.tsx and RunPage.tsx, plus tests.
 
+---
+
+## 24. Phase 6: Inbox and Signal detail (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 24.1 Scope and decisions
+- No LLM calls, no migration, no new packages. The score is shown ONLY for ranked labels (buyer_intent, competitor_complaint). For venting and noise the UI shows the label and the text "Not ranked" and never a numeric score or score breakdown (a noise post can score above 0 because of recency and engagement; showing it would mislead). The stored data is unchanged.
+- The word for a result is "signal" in all UI text. Never write "lead" in user-visible text.
+
+### 24.2 Shared (packages/shared)
+- FeedbackRequestSchema = z.object({ action: z.enum(FEEDBACK_ACTIONS) }); types FeedbackRequest, EvidenceSpan = { criterion: CriterionId; quote: string; start: number; end: number } (offsets into the full post text, end exclusive), DecisionTrace = { model: string | null; promptVersion: string | null; createdAt: string; status: string; output: Record<string, unknown> }, LeadDetail = { lead: LeadView; runId: string; text: string; evidence: EvidenceSpan[]; discardedQuotes: number; trace: DecisionTrace }.
+
+### 24.3 API
+- verification/verifyQuote.ts: export `normalizeWithMap(text): { normalized: string; map: number[] }` using EXACTLY the same normalisation as verifyQuote (lowercase, collapse whitespace runs to one space, curly quotes and en/em dashes to ASCII, trim) where map[i] is the index in the ORIGINAL text of normalized character i. Refactor verifyQuote to use it without changing its behaviour (existing tests must pass unchanged). Export `findEvidenceSpans(text, evidence: Array<{ criterion; quote }>): EvidenceSpan[]`: for each quote find it in the normalized text (first occurrence) and convert to original offsets: start = map[idx], end = map[idx + normalizedQuoteLength - 1] + 1; skip quotes that are not found; return spans sorted by start.
+- db/leads.ts (LeadStore, plus the fake-able interface): add `getLeadDetail(leadId): Promise<LeadDetail | null>` (joins leads, signals.text_snapshot and the classifier decision of that lead's run and signal; discardedQuotes = length of decision output.notes.unverified, 0 if missing; evidence offsets via findEvidenceSpans over the criteria with passed true; trace from the decision row), `setLeadStatus(leadId, status): Promise<boolean>` (false when no row matched) and `addFeedback(leadId, action): Promise<void>` (insert into the existing `feedback` table: lead_id, action).
+- New routes/leads.ts exporting createLeadsRouter(deps); mount it in index.ts like the runs router. UUID validation and error bodies like the other routes (400 { error: 'Invalid lead id' }, 404 { error: 'Lead not found' }, 500 { error: 'Internal error' } with the message logged via instanceof Error).
+  - `GET /leads/:leadId` answers 200 { detail: LeadDetail }.
+  - `POST /leads/:leadId/feedback` validates the body with FeedbackRequestSchema (400 { error: 'Invalid request', issues } using `.issues`), maps accept to 'accepted', reject to 'rejected', reset to 'new', calls setLeadStatus (false gives 404), then addFeedback, and answers 200 { status }.
+- If creating these fails at startup the server must still start.
+
+### 24.4 Web routes (apps/web/src/app/routes.tsx)
+Add `{ name: 'signals', runId }` for `#/runs/<uuid>/signals` and `{ name: 'signal', runId, leadId }` for `#/runs/<uuid>/signals/<uuid>`. Existing routes keep working; parseHash stays pure and tested. RunPage shows a primary button "View signals" (link to the signals route) once the run is no longer running and signalCount > 0.
+
+### 24.5 Inbox page (pages/InboxPage.tsx, components/SignalCard.tsx, lib/inbox.ts)
+- Loads GET /runs/:runId/leads?include=all once (api.ts gets getLeads and getLeadDetail and sendFeedback). Page header: product name from getRun, run id short, counts: "N buying signals, M other signals".
+- Default view lists only buyer_intent and competitor_complaint signals in rank order. A toggle "Show other signals (venting, noise)" adds the rest below them. Filters: label (All, Buyer intent, Competitor complaint, Venting, Noise), status (All, New, Accepted, Rejected), minimum score (number; applies only to ranked labels). The filter and sort logic lives in lib/inbox.ts as pure, tested functions.
+- Card: rank, label badge (text, not colour only), score badge only for ranked labels else the text "Not ranked", confidence as "Evidence check: X%" when not null, source and community, @handle, age ("34 days ago" via a pure formatAge), the model's one-line summary (rationale), a link "Open original post" (target _blank, rel noopener noreferrer), and a link to the detail page. Rejected cards are dimmed with a "Rejected" text badge; accepted show "Accepted".
+- States: loading; error with retry (ErrorState); no signals at all ("No signals were scored for this run yet"); none in the default view while others exist ("No buying signals in this run. N other signals were classified as venting or noise." plus a button that turns the toggle on).
+
+### 24.6 Signal detail page (pages/SignalDetailPage.tsx, components/EvidenceQuote.tsx, CriteriaChecklist.tsx, ScoreBreakdown.tsx, ReasoningTrace.tsx, lib/evidence.ts)
+- Back link to the inbox. Header: label badge, "Rank N" and the score ONLY for ranked labels, status badge, @handle, source, community, age, and "Open original post". A short note near it: "Vantage shows public posts only. It does not provide contact details or send messages."
+- Post text with each evidence span wrapped in <mark> (title and aria-label = the criterion name). lib/evidence.ts exports a pure `segmentText(text, spans)` returning ordered { text, highlighted, criterion? } segments, merging overlapping spans and ignoring invalid offsets (negative, past the end, start >= end). Preserve line breaks (white-space: pre-wrap).
+- "Summary (written by the model)": the rationale, visibly distinct from evidence. Under it, when discardedQuotes > 0: "N quote(s) from the model could not be found in the post and were discarded."
+- CriteriaChecklist: all five criteria with "Passed" or "Not passed" as text and the verified quote when passed. ScoreBreakdown (ranked labels only): a table of component, value (percent), weight, points, and the total; the total equals the stored score. For other labels show "Not ranked: this signal was not classified as a buying signal, so it is not scored."
+- A facts panel from enrichment: competitors mentioned, purchase terms found, team terms found, age in days, comments, upvotes.
+- Buttons Accept, Reject, Reset call the feedback endpoint (disabled while pending, error shown with ErrorState, status badge updates on success; the inbox reflects it after a reload).
+- ReasoningTrace: a native <details> element "Raw trace" with model, prompt version, timestamp, status and the output JSON pretty-printed in a <pre>.
+- States: loading, error with retry, 404 shows "Signal not found".
+
+### 24.7 Styling and accessibility
+Plain CSS added to src/styles/tokens.css using the existing variables (no new libraries, no Tailwind). Keyboard reachable controls with visible focus, labels on every control, never colour alone, `prefers-reduced-motion` respected, works down to 360px width.
+
+### 24.8 Files
+API: verification/verifyQuote.ts, db/leads.ts, routes/leads.ts, index.ts, packages/shared (types.ts, schemas.ts). Web: app/routes.tsx, app/App.tsx, lib/api.ts, lib/format.ts (formatAge, label text), lib/inbox.ts, lib/evidence.ts, pages/InboxPage.tsx, pages/SignalDetailPage.tsx, pages/RunPage.tsx, components/SignalCard.tsx, EvidenceQuote.tsx, CriteriaChecklist.tsx, ScoreBreakdown.tsx, ReasoningTrace.tsx, styles/tokens.css, plus tests.
+
 

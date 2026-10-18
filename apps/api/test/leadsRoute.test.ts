@@ -78,6 +78,9 @@ const leadStore: LeadStore & { calls: Array<{ runId: string; includeAll: boolean
     this.calls.push({ runId, includeAll });
     return [lead];
   },
+  async getLeadDetail(_leadId) { return null; },
+  async setLeadStatus(_leadId, _status) { return true; },
+  async addFeedback(_leadId, _action) {},
 };
 
 const ctx: AdapterContext = {

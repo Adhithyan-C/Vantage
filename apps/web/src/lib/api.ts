@@ -1,4 +1,4 @@
-import type { RunCreateRequest, RunEvent, RunView } from '@vantage/shared';
+import type { FeedbackAction, LeadDetail, LeadView, RunCreateRequest, RunEvent, RunView } from '@vantage/shared';
 
 const BASE = '/api';
 
@@ -71,4 +71,24 @@ export async function getEvents(runId: string, after: number): Promise<RunEvent[
     `/runs/${encodeURIComponent(runId)}/events?after=${after}`,
   );
   return body.events;
+}
+
+export async function getLeads(runId: string): Promise<LeadView[]> {
+  const body = await request<{ leads: LeadView[] }>(
+    `/runs/${encodeURIComponent(runId)}/leads?include=all`,
+  );
+  return body.leads;
+}
+
+export async function getLeadDetail(leadId: string): Promise<LeadDetail> {
+  const body = await request<{ detail: LeadDetail }>(`/leads/${encodeURIComponent(leadId)}`);
+  return body.detail;
+}
+
+export function sendFeedback(leadId: string, action: FeedbackAction): Promise<{ status: LeadView['status'] }> {
+  return request<{ status: LeadView['status'] }>(`/leads/${encodeURIComponent(leadId)}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action }),
+  });
 }

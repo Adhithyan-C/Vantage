@@ -11,6 +11,7 @@ import { createDb } from './db/client';
 import { createRunStore } from './db/runs';
 import { createLlmClient } from './llm/client';
 import { createRunsRouter } from './routes/runs';
+import { createLeadsRouter } from './routes/leads';
 import { defaultAdapterContext, getEnabledAdapters } from './sources/index';
 
 function errorMessage(err: unknown): string {
@@ -25,6 +26,7 @@ async function main(): Promise<void> {
   const store = createRunStore(db);
   let decisionStore: ReturnType<typeof createDecisionStore> | undefined;
   let leadStore: ReturnType<typeof createLeadStore> | undefined;
+  let leadsRouter: express.Router | undefined;
   let score: ReturnType<typeof createScoreStage> | undefined;
   let classify: ReturnType<typeof createClassifyStage> | undefined;
   try {
@@ -43,6 +45,7 @@ async function main(): Promise<void> {
   try {
     leadStore = createLeadStore(db);
     score = createScoreStage({ store: leadStore });
+    leadsRouter = createLeadsRouter({ store: leadStore });
   } catch (err) {
     console.warn(`Warning: scorer is unavailable: ${errorMessage(err)}`);
   }
@@ -74,6 +77,9 @@ async function main(): Promise<void> {
       leadStore,
     }),
   );
+  if (leadsRouter) {
+    app.use(leadsRouter);
+  }
 
   app.listen(env.PORT, () => {
     console.log(`Vantage API listening on port ${env.PORT}`);

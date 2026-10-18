@@ -56,6 +56,12 @@ class FakeLeadStore implements LeadStore {
   async listLeads(_runId: string, _includeAll: boolean) {
     return [];
   }
+
+  async getLeadDetail(_leadId: string) { return null; }
+
+  async setLeadStatus(_leadId: string, _status: 'new' | 'accepted' | 'rejected') { return true; }
+
+  async addFeedback(_leadId: string, _action: 'accept' | 'reject' | 'reset'): Promise<void> {}
 }
 
 describe('createScoreStage', () => {

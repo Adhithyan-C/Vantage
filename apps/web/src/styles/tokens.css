@@ -496,3 +496,136 @@ textarea.control {
     grid-template-columns: 1fr;
   }
 }
+
+.signal-card-top,
+.signal-links,
+.feedback-actions,
+.toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.signal-card-top {
+  margin-bottom: 10px;
+}
+
+.signal-meta {
+  margin-bottom: 10px;
+}
+
+.signal-links {
+  margin-top: 12px;
+  gap: 16px;
+}
+
+.signal-rejected {
+  opacity: 0.62;
+}
+
+.status-accepted {
+  color: var(--success);
+}
+
+.status-rejected {
+  color: var(--danger);
+}
+
+.filter-panel .field-row {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+}
+
+.toggle-row {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.post-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+mark {
+  color: var(--text);
+  background: var(--warning-soft);
+  outline: 1px solid var(--warning);
+}
+
+.criteria-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.criteria-list li + li {
+  margin-top: 10px;
+}
+
+blockquote {
+  margin: 6px 0 0;
+  padding-left: 12px;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+
+.summary-card {
+  border-left: 4px solid var(--accent);
+}
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+th,
+td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.facts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 12px;
+}
+
+.facts-grid dt,
+.raw-trace dt {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.facts-grid dd,
+.raw-trace dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.raw-trace summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.raw-trace pre {
+  max-width: 100%;
+  overflow-x: auto;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: var(--radius-control);
+}
+
+@media (max-width: 360px) {
+  .signal-card-top .badge {
+    white-space: normal;
+  }
+
+  .feedback-actions .btn {
+    flex: 1 1 80px;
+  }
+}

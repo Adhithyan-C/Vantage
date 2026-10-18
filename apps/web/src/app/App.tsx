@@ -1,6 +1,8 @@
 import { EmptyState } from '../components/EmptyState';
 import { RunPage } from '../pages/RunPage';
 import { SetupPage } from '../pages/SetupPage';
+import { InboxPage } from '../pages/InboxPage';
+import { SignalDetailPage } from '../pages/SignalDetailPage';
 import { useRoute } from './routes';
 
 export function App() {
@@ -23,6 +25,10 @@ export function App() {
       <main className="app-main">
         {route.name === 'setup' && <SetupPage />}
         {route.name === 'run' && <RunPage key={route.runId} runId={route.runId} />}
+        {route.name === 'signals' && <InboxPage key={route.runId} runId={route.runId} />}
+        {route.name === 'signal' && (
+          <SignalDetailPage key={route.leadId} runId={route.runId} leadId={route.leadId} />
+        )}
         {route.name === 'not-found' && (
           <EmptyState
             title="Page not found"

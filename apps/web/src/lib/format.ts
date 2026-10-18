@@ -1,4 +1,4 @@
-import type { EventKind, RunStatus, SourceId } from '@vantage/shared';
+import type { EventKind, LeadLabel, RunStatus, SourceId } from '@vantage/shared';
 
 export const SOURCE_LABEL: Record<SourceId, string> = {
   reddit: 'Reddit',
@@ -49,3 +49,22 @@ export function formatClock(iso: string): string {
 export function shortId(id: string): string {
   return id.slice(0, 8);
 }
+
+export function formatAge(createdAtSource: string, nowMs: number): string {
+  const created = Date.parse(createdAtSource);
+  if (Number.isNaN(created) || !Number.isFinite(nowMs)) {
+    return '';
+  }
+  const days = Math.max(0, Math.floor((nowMs - created) / 86_400_000));
+  if (days === 0) {
+    return 'today';
+  }
+  return `${days} ${days === 1 ? 'day' : 'days'} ago`;
+}
+
+export const LABEL_TEXT: Record<LeadLabel, string> = {
+  buyer_intent: 'Buyer intent',
+  competitor_complaint: 'Competitor complaint',
+  venting: 'Venting',
+  noise: 'Noise',
+};

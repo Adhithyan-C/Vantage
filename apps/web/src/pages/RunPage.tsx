@@ -85,9 +85,7 @@ export function RunPage({ runId }: { runId: string }) {
               hint="Try different keywords or a longer time window."
             />
           ) : (
-            <p className="muted">
-              The ranked list with evidence is the next screen to be built.
-            </p>
+            <p><a className="btn btn-primary" href={`#/runs/${encodeURIComponent(run.id)}/signals`}>View signals</a></p>
           )}
         </section>
       )}
