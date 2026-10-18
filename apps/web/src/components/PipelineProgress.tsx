@@ -13,8 +13,8 @@ const STAGES: Stage[] = [
   { id: 'scout', name: 'Scout', description: 'Fetch, remove duplicates, store signals', built: true },
   { id: 'displacement', name: 'Displacement', description: 'Group competitor complaints', built: false },
   { id: 'classifier', name: 'Classifier', description: 'Label buying intent with evidence', built: true },
-  { id: 'enricher', name: 'Enricher', description: 'Add structured context', built: false },
-  { id: 'scorer', name: 'Scorer', description: 'Compute the score from the evidence', built: false },
+  { id: 'enricher', name: 'Enricher', description: 'Add structured context', built: true },
+  { id: 'scorer', name: 'Scorer', description: 'Compute the score from the evidence', built: true },
 ];
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {
@@ -107,11 +107,53 @@ function classifierSummary(events: RunEvent[]): string {
   return `${count('buyer_intent')} buyer intent · ${count('competitor_complaint')} competitor complaint · ${count('venting')} venting · ${count('noise')} noise`;
 }
 
+export function agentStageStatus(
+  agent: 'enricher' | 'scorer',
+  finalPrefix: 'Enriched ' | 'Scored ',
+  run: RunView,
+  events: RunEvent[],
+): string {
+  const stageEvents = events.filter((event) => event.agent === agent);
+  if (stageEvents.length === 0) {
+    return run.status === 'running' ? 'Waiting' : 'Skipped';
+  }
+  const hasFinalInfo = stageEvents.some(
+    (event) => event.kind === 'info' && event.message.startsWith(finalPrefix),
+  );
+  if (!hasFinalInfo) {
+    return 'Running';
+  }
+  return stageEvents.some((event) => event.kind === 'warning' || event.kind === 'error')
+    ? 'Completed with warnings'
+    : 'Completed';
+}
+
+export function agentSummary(events: RunEvent[], agent: 'enricher' | 'scorer'): string {
+  const prefix = agent === 'enricher' ? 'Enriched ' : 'Scored ';
+  const finalEvent = [...events]
+    .reverse()
+    .find((event) => event.agent === agent && event.kind === 'info' && event.message.startsWith(prefix));
+  if (!finalEvent?.counts) {
+    return '';
+  }
+  const count = (key: string) => {
+    const value = finalEvent.counts?.[key];
+    return typeof value === 'number' ? value : 0;
+  };
+  return agent === 'enricher'
+    ? `${count('enriched')} enriched`
+    : `${count('scored')} scored · ${count('ranked')} in the ranked list`;
+}
+
 export function PipelineProgress({ run, events }: { run: RunView; events: RunEvent[] }) {
   const summary = scoutSummary(events);
   const scoutBadge = scoutStatus(run, events);
   const classifierInfo = classifierSummary(events);
   const classifierBadge = classifierStatus(run, events);
+  const enricherInfo = agentSummary(events, 'enricher');
+  const enricherBadge = agentStageStatus('enricher', 'Enriched ', run, events);
+  const scorerInfo = agentSummary(events, 'scorer');
+  const scorerBadge = agentStageStatus('scorer', 'Scored ', run, events);
 
   return (
     <section className="card" aria-labelledby="pipeline-title">
@@ -128,11 +170,21 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
               {stage.id === 'classifier' && classifierInfo && (
                 <p className="stage-summary">{classifierInfo}</p>
               )}
+              {stage.id === 'enricher' && enricherInfo && (
+                <p className="stage-summary">{enricherInfo}</p>
+              )}
+              {stage.id === 'scorer' && scorerInfo && (
+                <p className="stage-summary">{scorerInfo}</p>
+              )}
             </div>
             {stage.id === 'scout' ? (
               <span className="badge badge-planned">{scoutBadge}</span>
             ) : stage.id === 'classifier' ? (
               <span className="badge badge-planned">{classifierBadge}</span>
+            ) : stage.id === 'enricher' ? (
+              <span className="badge badge-planned">{enricherBadge}</span>
+            ) : stage.id === 'scorer' ? (
+              <span className="badge badge-planned">{scorerBadge}</span>
             ) : stage.built ? (
               <RunStatusBadge status={run.status} />
             ) : (

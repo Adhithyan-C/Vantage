@@ -976,3 +976,65 @@ For HTTP 404, 401, or 403, disable that provider for the client/process lifetime
 Use injected fakes only: no real network/database or module mocks. Verify default/reversed/invalid provider order, model overrides in actual requests, missing-key skipping, empty env values, and order parsing. Verify 404/401/403 trip breakers, later calls make no further request to disabled providers, each trip warns once with the exact safe text, and 429/503/500/network/timeout do not trip. Verify continuing enabled providers and all-disabled errors with provider errors.
 
 Client tests cover 403 and network fallback, numeric and fallback retry delays, three 429 attempts then fallback, 20-second cap, sanitized error messages including echoed configured and regex-matched keys, one error per failed request with correct status, 429/503 retry before fallback, other non-2xx no retry, empty/blocked fallback, and model/order/key behavior. Classifier tests verify failure output `{ error: { providers } }`, status, mixed `failureReasons`, and absence of prompt/post text. Pipeline tests verify most-frequent reason formatting, HTTP/null reason rendering, event counts, deterministic ties, and updated warning text. Prompt tests verify v2, refined labels, preserved injection defenses and delimiters, and all imports use v2. Environment tests cover the three optional variables, overrides, empty values, unknown names, and default fallback. Scout badge tests cover running/completed/warnings/all-failed states and preserve the header run badge.
+
+---
+
+## 23. Phase 5: Enricher and Scorer (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 23.1 Scope
+After classification, the pipeline enriches and scores every signal of the run that has an 'ok' classifier decision, stores one row per signal in `leads` (existing table: run_id, signal_id, label, score int 0..100, score_breakdown jsonb, rank int, status default 'new', unique (run_id, signal_id)), and exposes them through a new API route. No LLM calls in this phase. Scoring is plain deterministic code. No new packages and no migration.
+
+### 23.2 Config
+- config/scoring.ts: RECENCY_HALF_LIFE_DAYS becomes 30 (override of the earlier 14: HN threads stay relevant longer). SCORE_WEIGHTS and ENGAGEMENT_CAP stay as they are.
+- New config/enrich.ts exports PURCHASE_TERMS = ['price','pricing','cost','expensive','cheaper','budget','switch','switching','migrate','migrating','alternative','alternatives','recommend','recommendation','looking for','evaluating','replace','replacing','subscription','per seat'] and TEAM_TERMS = ['our team','my team','small team','startup','founder','co-founder','cto','ceo','support team','we are a','we have','employees','solo','indie','our customers','our users','our company'].
+
+### 23.3 Enricher (apps/api/src/agents/enricher.ts, pure function, no I/O)
+`enrichSignal({ text, source, community, createdAtSource, engagement, competitors, now }): Enrichment`.
+Enrichment = { ageDays: number (never negative, rounded to 1 decimal), commentCount: number (0 if missing), upvotes: number (0 if missing), source, community: string | null, competitorsMentioned: string[], purchaseTermsFound: string[], teamTermsFound: string[], fit: { competitorMentioned: boolean, purchaseLanguage: boolean, teamOrRoleContext: boolean } }.
+- Matching is case-insensitive on the stored post text. A competitor is mentioned when its name appears as a whole word (escape regex characters; use word boundaries). Term lists use plain substring matching on the lowercased text. Keep list order, no duplicates.
+- fit.competitorMentioned = competitorsMentioned is non-empty; fit.purchaseLanguage = purchaseTermsFound non-empty; fit.teamOrRoleContext = teamTermsFound non-empty.
+- Add the type Enrichment to packages/shared.
+
+### 23.4 Scorer (apps/api/src/scoring/computeScore.ts, pure function, no I/O) and agents/scorer.ts
+`computeScore({ passedCriteria: CriterionId[], enrichment, rubric, weights, halfLifeDays, engagementCap }): ScoreBreakdown`:
+- intent = sum of rubric weights of passedCriteria divided by the sum of all rubric weights (0..1).
+- fit = (number of true values in enrichment.fit) / 3.
+- recency = 0.5 ^ (ageDays / halfLifeDays).
+- engagement = min(1, ln(1 + commentCount + upvotes / 5) / ln(1 + engagementCap)).
+- components in this order: intent, fit, recency, engagement; each { name, value (full precision), weight (from SCORE_WEIGHTS), contribution = 100 * weight * value rounded to 2 decimals }.
+- total = Math.round(100 * (sum of weight * value)) computed from the UNROUNDED values, clamped 0..100. Return { components, total } matching ScoreBreakdownSchema.
+`computeConfidence(passedCount, unverifiedCount): number | null` = passedCount / (passedCount + unverifiedCount), or null when both are 0. unverifiedCount comes from the decision's output.notes.unverified (array length, 0 if missing).
+`rankLeads(items)` sorts by label tier (buyer_intent 0, competitor_complaint 1, venting 2, noise 3), then score descending, then createdAtSource descending, then signalId; returns the items with rank 1..n. This tier-first ordering means noise and venting can never outrank a buyer.
+
+Golden test values (assert these; use toBeCloseTo with 2 decimals for contributions and exact equality for totals):
+ - Case A: passed = states_problem, asks_for_recommendation, names_competitor; fit = { competitorMentioned: true, purchaseLanguage: true, teamOrRoleContext: false }; ageDays 30; commentCount 3; upvotes 7. Expect intent value 0.70 (contribution 28.00), fit 0.6667 (16.67), recency 0.5 (10.00), engagement 0.4541 (6.81), total 61.
+ - Case B: nothing passed, all fit false, ageDays 0, commentCount 0, upvotes 0. Expect contributions 0, 0, 20.00, 0 and total 20.
+ - Case C: commentCount 100, upvotes 0: engagement value is exactly 1 (capped), contribution 15.00.
+ - Case D: ageDays 60 gives recency 0.25.
+ - computeConfidence(2, 1) = 0.6667 (toBeCloseTo), computeConfidence(0, 0) = null, computeConfidence(3, 0) = 1.
+
+### 23.5 Lead store and score stage
+- apps/api/src/db/leads.ts: interface LeadStore plus a supabase-backed factory (so it can be faked): `getScoringContext(runId)` returns { seller (productName, problemDescription, competitors), items } where each item = { signal: id, text, source, community, url, authorHandle, createdAtSource, engagement }, plus the classifier decision for THIS run with status 'ok' (output with label, criteria, rationale, notes; evidence_verified); `saveLeads(runId, rows)`; `listLeads(runId, includeAll)` returning LeadView[].
+- saveLeads upserts on (run_id, signal_id) (onConflict string 'run_id,signal_id') with columns run_id, signal_id, label, score, score_breakdown, rank. It must NOT send `status`, so an existing lead keeps its status on re-scoring. score_breakdown is stored as { components, total, confidence, enrichment }.
+- `createScoreStage({ store, now?, config? })` returns `ScoreStage = (runId) => Promise<ScoreSummary>` where ScoreSummary = { scored: number, ranked: number, topScore: number | null } (ranked = leads labelled buyer_intent or competitor_complaint; topScore = the highest score among those, else null). It loads the context, enriches and scores each item (passedCriteria = criteria with passed true), ranks all items, saves them. No items gives { 0, 0, null } and saves nothing.
+- Types in packages/shared: LeadView = { leadId, signalId, rank, label, score, confidence: number | null, status: 'new' | 'accepted' | 'rejected', source, url, authorHandle, community: string | null, createdAtSource, textPreview (first 280 chars), rationale, criteria: [{ id, passed, quote: string | null }], evidenceVerified, breakdown: ScoreBreakdown, enrichment: Enrichment }.
+
+### 23.6 Pipeline integration (apps/api/src/orchestrator/runPipeline.ts)
+- PipelineDeps gets an OPTIONAL `score?: ScoreStage`. Without it behaviour is exactly as before (all existing tests pass unchanged).
+- It runs only when classification ran and (classified + reused) > 0, after the classifier events and before the final status. Events, in order: agent 'enricher' progress `Enriching ${n} classified signal(s)` with counts { total: n } where n = classified + reused; then the stage runs; then enricher info `Enriched ${scored} signal(s)` with counts { enriched: scored }; scorer progress `Scoring ${scored} signal(s)` with counts { total: scored }; scorer info `Scored ${scored} signal(s): ${ranked} in the ranked list` with counts { scored, ranked, topScore }; when ranked is 0 also a scorer warning `No buyer intent or competitor complaint signals in this run`.
+- If the stage throws: scorer error `Scoring failed: ${message}` (message via instanceof Error) and continue. Run status: a run that would be 'completed' becomes 'completed_with_warnings' only when the stage threw. Having zero ranked signals does not change the status.
+
+### 23.7 API (routes/runs.ts, wiring in index.ts)
+- `GET /runs/:runId/leads?include=all`: same runId validation and error bodies as the other routes. `include` is optional; the only valid value is 'all', anything else gives 400 { error: 'Invalid include' }. Default returns only labels buyer_intent and competitor_complaint; include=all returns every label. Ordered by rank ascending, at most 100. Answer 200 { leads: LeadView[] }.
+- index.ts builds the lead store and score stage and passes `score` into the router deps. If creating them fails the server must still start and runs must complete without scoring.
+
+### 23.8 Web (small)
+- PipelineProgress: Enricher and Scorer become live stages with the same badge rules as the Classifier (no events and run running: Waiting; final info event: Completed (Completed with warnings if that stage emitted a warning or error); events but no final: Running; run finished with no events for that stage: Skipped). Summary lines: Enricher shows "N enriched"; Scorer shows "N scored Â· M in the ranked list" from the last scorer info event counts. Update the existing stage tests accordingly.
+- RunPage result note becomes: "The ranked list with evidence is the next screen to be built."
+
+### 23.9 Files
+packages/shared/src/types.ts, config/scoring.ts, config/enrich.ts, agents/enricher.ts, scoring/computeScore.ts, agents/scorer.ts, db/leads.ts, orchestrator/runPipeline.ts, routes/runs.ts, index.ts, web PipelineProgress.tsx and RunPage.tsx, plus tests.
+
+

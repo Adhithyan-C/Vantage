@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RunEvent, RunView } from '@vantage/shared';
-import { RunStatusBadge, scoutStatus } from './PipelineProgress';
+import { agentStageStatus, agentSummary, RunStatusBadge, scoutStatus } from './PipelineProgress';
 
 function run(status: RunView['status'], sourceStatuses: RunView['sources'][number]['status'][] = ['ok']): RunView {
   return {
@@ -31,6 +31,15 @@ const scoutComplete: RunEvent = {
   createdAt: '2026-10-01T00:01:00Z',
 };
 
+function stageEvent(
+  agent: 'enricher' | 'scorer',
+  kind: RunEvent['kind'],
+  message: string,
+  counts: Record<string, unknown> | null = null,
+): RunEvent {
+  return { ...scoutComplete, id: 2, agent, kind, message, counts };
+}
+
 describe('Scout pipeline badge', () => {
   it('stays Running until the dedupe-count event arrives during a running run', () => {
     expect(scoutStatus(run('running'), [])).toBe('Running');
@@ -60,5 +69,49 @@ describe('Scout pipeline badge', () => {
   it('uses the run status for the page-header badge', () => {
     const badge = RunStatusBadge({ status: 'completed_with_warnings' });
     expect(badge.props.className).toContain('badge-run-completed_with_warnings');
+  });
+});
+
+describe('Enricher and Scorer pipeline stages', () => {
+  it('shows Waiting before events, Running while active, and Skipped when finished without events', () => {
+    expect(agentStageStatus('enricher', 'Enriched ', run('running'), [])).toBe('Waiting');
+    expect(agentStageStatus('scorer', 'Scored ', run('completed'), [])).toBe('Skipped');
+    expect(agentStageStatus(
+      'enricher',
+      'Enriched ',
+      run('completed'),
+      [stageEvent('enricher', 'progress', 'Enriching 2 classified signal(s)')],
+    )).toBe('Running');
+  });
+
+  it('marks completed final info events complete and degraded stages with warnings', () => {
+    const enricherInfo = stageEvent('enricher', 'info', 'Enriched 2 signal(s)', { enriched: 2 });
+    const scorerInfo = stageEvent('scorer', 'info', 'Scored 2 signal(s): 1 in the ranked list', {
+      scored: 2,
+      ranked: 1,
+      topScore: 72,
+    });
+    expect(agentStageStatus('enricher', 'Enriched ', run('running'), [enricherInfo])).toBe('Completed');
+    expect(agentStageStatus('scorer', 'Scored ', run('running'), [scorerInfo])).toBe('Completed');
+    expect(agentStageStatus('scorer', 'Scored ', run('completed'), [
+      scorerInfo,
+      stageEvent('scorer', 'warning', 'No buyer intent or competitor complaint signals in this run'),
+    ])).toBe('Completed with warnings');
+    expect(agentStageStatus('enricher', 'Enriched ', run('completed'), [
+      stageEvent('enricher', 'error', 'Enrichment failed'),
+    ])).toBe('Running');
+  });
+
+  it('formats the Enricher and Scorer summary lines from final event counts', () => {
+    expect(agentSummary([
+      stageEvent('enricher', 'info', 'Enriched 4 signal(s)', { enriched: 4 }),
+    ], 'enricher')).toBe('4 enriched');
+    expect(agentSummary([
+      stageEvent('scorer', 'info', 'Scored 4 signal(s): 2 in the ranked list', {
+        scored: 4,
+        ranked: 2,
+        topScore: 79,
+      }),
+    ], 'scorer')).toBe(`4 scored \u00b7 2 in the ranked list`);
   });
 });

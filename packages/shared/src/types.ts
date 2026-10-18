@@ -28,6 +28,43 @@ export type CriterionResult = z.infer<typeof CriterionResultSchema>;
 export type ClassifierOutput = z.infer<typeof ClassifierOutputSchema>;
 export type ScoreComponent = z.infer<typeof ScoreComponentSchema>;
 export type ScoreBreakdown = z.infer<typeof ScoreBreakdownSchema>;
+
+export interface Enrichment {
+  ageDays: number;
+  commentCount: number;
+  upvotes: number;
+  source: SourceId;
+  community: string | null;
+  competitorsMentioned: string[];
+  purchaseTermsFound: string[];
+  teamTermsFound: string[];
+  fit: {
+    competitorMentioned: boolean;
+    purchaseLanguage: boolean;
+    teamOrRoleContext: boolean;
+  };
+}
+
+export interface LeadView {
+  leadId: string;
+  signalId: string;
+  rank: number;
+  label: LeadLabel;
+  score: number;
+  confidence: number | null;
+  status: (typeof import('./constants').LEAD_STATUSES)[number];
+  source: SourceId;
+  url: string;
+  authorHandle: string;
+  community: string | null;
+  createdAtSource: string;
+  textPreview: string;
+  rationale: string;
+  criteria: Array<{ id: CriterionId; passed: boolean; quote: string | null }>;
+  evidenceVerified: boolean;
+  breakdown: ScoreBreakdown;
+  enrichment: Enrichment;
+}
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type SourceStatus = (typeof SOURCE_STATUSES)[number];
 export type EventKind = (typeof EVENT_KINDS)[number];

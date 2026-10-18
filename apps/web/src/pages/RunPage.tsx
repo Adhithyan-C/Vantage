@@ -86,7 +86,7 @@ export function RunPage({ runId }: { runId: string }) {
             />
           ) : (
             <p className="muted">
-              The ranked list with evidence appears here once scoring is added.
+              The ranked list with evidence is the next screen to be built.
             </p>
           )}
         </section>

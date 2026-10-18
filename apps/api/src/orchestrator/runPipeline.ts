@@ -3,6 +3,7 @@ import type { RunStore } from '../db/runs';
 import type { SourceAdapter, AdapterContext } from '../sources/types';
 import { runScout } from '../agents/scout';
 import type { ClassifyStage, ClassifySummary } from '../agents/classifier';
+import type { ScoreStage } from '../agents/scorer';
 import { maxClassifyPerRun } from '../config/llm';
 import { createEmitter } from './events';
 
@@ -11,6 +12,7 @@ export interface PipelineDeps {
   adapters: SourceAdapter[];
   ctx: AdapterContext;
   classify?: ClassifyStage;
+  score?: ScoreStage;
 }
 
 export function computeRunStatus(reports: Array<{ status: SourceStatus }>): RunStatus {
@@ -139,6 +141,7 @@ export async function runPipeline(
     }
 
     let classificationFailed = false;
+    let scoringFailed = false;
     if (deps.classify && result.afterDedupe > 0) {
       await emit.progress('classifier', `Classifying ${result.afterDedupe} signal(s)`, {
         total: result.afterDedupe,
@@ -184,11 +187,44 @@ export async function runPipeline(
             `${summary.failed} signal(s) could not be classified (${reason})`,
           );
         }
+        const classifiedTotal = summary.classified + summary.reused;
+        if (deps.score && classifiedTotal > 0) {
+          await emit.progress('enricher', `Enriching ${classifiedTotal} classified signal(s)`, {
+            total: classifiedTotal,
+          });
+          try {
+            const scoreSummary = await deps.score(runId);
+            await emit.info('enricher', `Enriched ${scoreSummary.scored} signal(s)`, {
+              enriched: scoreSummary.scored,
+            });
+            await emit.progress('scorer', `Scoring ${scoreSummary.scored} signal(s)`, {
+              total: scoreSummary.scored,
+            });
+            await emit.info(
+              'scorer',
+              `Scored ${scoreSummary.scored} signal(s): ${scoreSummary.ranked} in the ranked list`,
+              {
+                scored: scoreSummary.scored,
+                ranked: scoreSummary.ranked,
+                topScore: scoreSummary.topScore,
+              },
+            );
+            if (scoreSummary.ranked === 0) {
+              await emit.warning(
+                'scorer',
+                'No buyer intent or competitor complaint signals in this run',
+              );
+            }
+          } catch (err) {
+            scoringFailed = true;
+            await emit.error('scorer', `Scoring failed: ${errorMessage(err)}`);
+          }
+        }
       }
     }
 
     const sourceStatus = computeRunStatus(result.sources);
-    const status = sourceStatus === 'completed' && classificationFailed
+    const status = sourceStatus === 'completed' && (classificationFailed || scoringFailed)
       ? 'completed_with_warnings'
       : sourceStatus;
     await store.setRunStatus(runId, status, true);

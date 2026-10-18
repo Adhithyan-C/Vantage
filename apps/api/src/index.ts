@@ -4,7 +4,9 @@ import { fileURLToPath } from 'node:url';
 import { getEnv } from './config/env';
 import { LLM_CONFIG } from './config/llm';
 import { createClassifyStage } from './agents/classifier';
+import { createScoreStage } from './agents/scorer';
 import { createDecisionStore } from './db/decisions';
+import { createLeadStore } from './db/leads';
 import { createDb } from './db/client';
 import { createRunStore } from './db/runs';
 import { createLlmClient } from './llm/client';
@@ -22,6 +24,8 @@ async function main(): Promise<void> {
   const db = createDb(env);
   const store = createRunStore(db);
   let decisionStore: ReturnType<typeof createDecisionStore> | undefined;
+  let leadStore: ReturnType<typeof createLeadStore> | undefined;
+  let score: ReturnType<typeof createScoreStage> | undefined;
   let classify: ReturnType<typeof createClassifyStage> | undefined;
   try {
     const llm = createLlmClient({
@@ -34,6 +38,13 @@ async function main(): Promise<void> {
     classify = createClassifyStage({ llm, store: decisionStore, config: LLM_CONFIG });
   } catch (err) {
     console.warn(`Warning: classifier is unavailable: ${errorMessage(err)}`);
+  }
+
+  try {
+    leadStore = createLeadStore(db);
+    score = createScoreStage({ store: leadStore });
+  } catch (err) {
+    console.warn(`Warning: scorer is unavailable: ${errorMessage(err)}`);
   }
 
   try {
@@ -59,6 +70,8 @@ async function main(): Promise<void> {
       ctx: defaultAdapterContext(),
       classify,
       decisionStore,
+      score,
+      leadStore,
     }),
   );
 

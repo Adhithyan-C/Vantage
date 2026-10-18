@@ -1,6 +1,7 @@
 import express from 'express';
 import { RunCreateRequestSchema } from '@vantage/shared';
 import type { DecisionView } from '@vantage/shared';
+import type { LeadStore } from '../db/leads';
 import { DEMO_RUN_PARAMS, loadDemoSeller } from '../config/demo';
 import type { DecisionStore } from '../db/decisions';
 import { runPipeline } from '../orchestrator/runPipeline';
@@ -13,7 +14,7 @@ function errorMessage(err: unknown): string {
 }
 
 export function createRunsRouter(
-  deps: PipelineDeps & { decisionStore?: DecisionStore },
+  deps: PipelineDeps & { decisionStore?: DecisionStore; leadStore?: LeadStore },
 ): express.Router {
   const router = express.Router();
   const { store } = deps;
@@ -111,6 +112,30 @@ export function createRunsRouter(
       res.status(200).json({ decisions });
     } catch (err) {
       console.error(`GET /runs/:runId/decisions failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  router.get('/runs/:runId/leads', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const include = req.query.include;
+      if (include !== undefined && (typeof include !== 'string' || include !== 'all')) {
+        res.status(400).json({ error: 'Invalid include' });
+        return;
+      }
+      if (!deps.leadStore) {
+        res.status(500).json({ error: 'Internal error' });
+        return;
+      }
+      const leads = await deps.leadStore.listLeads(runId, include === 'all');
+      res.status(200).json({ leads });
+    } catch (err) {
+      console.error(`GET /runs/:runId/leads failed: ${errorMessage(err)}`);
       res.status(500).json({ error: 'Internal error' });
     }
   });
