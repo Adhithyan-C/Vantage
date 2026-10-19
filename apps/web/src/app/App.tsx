@@ -4,6 +4,7 @@ import { SetupPage } from '../pages/SetupPage';
 import { InboxPage } from '../pages/InboxPage';
 import { SignalDetailPage } from '../pages/SignalDetailPage';
 import { ReportPage } from '../pages/ReportPage';
+import { DemoBanner } from '../components/DemoBanner';
 import { useRoute } from './routes';
 
 export function App() {
@@ -11,6 +12,7 @@ export function App() {
 
   return (
     <div className="app">
+      <DemoBanner />
       <header className="app-header">
         <a className="brand" href="#/">
           Vantage

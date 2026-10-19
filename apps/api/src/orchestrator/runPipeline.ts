@@ -13,6 +13,8 @@ export interface PipelineDeps {
   ctx: AdapterContext;
   classify?: ClassifyStage;
   score?: ScoreStage;
+  runner?: (deps: PipelineDeps, runId: string, params: RunParams) => Promise<void>;
+  demoMode?: boolean;
 }
 
 export function computeRunStatus(reports: Array<{ status: SourceStatus }>): RunStatus {

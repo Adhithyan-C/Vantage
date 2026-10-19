@@ -121,6 +121,7 @@ export function ReportContent({ report }: { report: ReportView }) {
 
       <section className="card report-method" aria-labelledby="report-method-title">
         <h2 className="card-title" id="report-method-title">How to read this report</h2>
+        <p>Buying-intent signals are listed before competitor complaints; within each group, signals are ordered by score.</p>
         <p>Quotes were checked in code against the stored post text. The summary is written by a model and is not evidence. The score combines intent ({Math.round(report.method.weights.intent * 100)}%), fit ({Math.round(report.method.weights.fit * 100)}%), recency ({Math.round(report.method.weights.recency * 100)}%) and engagement ({Math.round(report.method.weights.engagement * 100)}%), with a recency half-life of {report.method.recencyHalfLifeDays} days.</p>
         <p>Vantage shows public posts only and does not provide contact details or send messages.</p>
       </section>

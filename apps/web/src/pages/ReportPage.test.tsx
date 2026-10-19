@@ -93,6 +93,7 @@ describe('report page rendering', () => {
     expect(html).toContain('Download CSV with all signals');
     expect(html).toContain('Print or save as PDF');
     expect(html).toContain('Back to signals');
+    expect(html).toContain('Buying-intent signals are listed before competitor complaints; within each group, signals are ordered by score.');
     expect(html.toLowerCase()).not.toContain('lead');
   });
 });

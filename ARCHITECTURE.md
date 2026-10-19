@@ -1151,4 +1151,37 @@ States: loading, ErrorState with retry, running message "The report is available
 ### 27.6 Files
 packages/shared (types.ts), report/csv.ts, routes/report.ts, index.ts, web: app/routes.tsx, app/App.tsx, lib/api.ts, pages/ReportPage.tsx, pages/InboxPage.tsx, pages/RunPage.tsx, styles/tokens.css, plus tests. Do not touch fixtures.
 
+---
+
+## 28. Phase 8B: demo replay mode (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 28.1 Purpose and honesty
+With DEMO_MODE=true the API serves a previously recorded run from fixtures/demo-run.json. It makes no Supabase, LLM, Hacker News or other network calls. POST /runs replays the recording instead of searching. Every page shows a banner saying so, including when printed. The recording is real output of an earlier run (it may contain sample data, which stays labelled as such). Replay must never be presented as a live run. No new packages, no migration.
+
+### 28.2 Fixture schema (apps/api/src/demo/schema.ts, Zod)
+DemoRunSchema = { version: literal 1, recordedAt: ISO string, note: string, run: RunView-shaped object, events: Array<{ id, agent, kind, message, counts (record or null), createdAt, offsetMs: int >= 0 }>, leads: LeadView-shaped array (every label, recorded order), details: record of leadId to LeadDetail-shaped object }. Build it from small Zod schemas that mirror the shared types, reusing the constants (LEAD_LABELS, AGENTS, EVENT_KINDS, RUN_STATUSES, SOURCE_STATUSES, SOURCE_IDS, CRITERION_IDS). A refinement requires every lead id to have an entry in details. The inferred output types must be assignable to the shared RunView, RunEvent, LeadView and LeadDetail (add compile-time assignment checks in the tests).
+
+### 28.3 Recording script
+apps/api/src/scripts/demo-record.ts with npm scripts "demo:record" in apps/api/package.json and the root package.json (same style as "scout"; these two script entries are the only package.json changes allowed). Options via node:util parseArgs: --run <uuid> (required, validated with the UUID pattern used elsewhere), --out (default fixtures/demo-run.json relative to the repo root). It loads the repo-root .env like the other scripts, builds the database client and stores (createRunStore, createLeadStore), refuses with a clear message when the run is not found or its status is 'running', reads the run (getRun), ALL events (loop listEvents with after = last id until it returns none), all leads (listLeads(runId, true)) and the detail of each lead (getLeadDetail), then builds the fixture with a pure exported function `buildDemoFixture(input)`: offsetMs = max(0, Date.parse(event.createdAt) - Date.parse(run.startedAt)); events sorted by id; note = `Recorded from run ${first 8 chars of run id}`. It validates with DemoRunSchema, writes pretty-printed JSON with a trailing newline, and prints counts (events, leads, details). Never print keys.
+
+### 28.4 Replay (apps/api/src/demo/replay.ts)
+`createReplay({ fixture, now?: () => number, maxTotalMs?: number }): { runStore: RunStore; leadStore: LeadStore }` (the existing interfaces from db/runs.ts and db/leads.ts). Replay never touches the network or a database.
+- Clock: replayStart is null until runStore.createRun is called; calling createRun again restarts it. totalMs = (largest event offsetMs) + 1500. scale = totalMs > maxTotalMs (default 30000) ? maxTotalMs / totalMs : 1. An event is visible when offsetMs * scale <= elapsed; the run is finished when elapsed >= totalMs * scale. While replayStart is null (a recorded run URL opened directly) behave as finished.
+- runStore: createSellerProfile returns a fixed placeholder uuid; createRun(sellerProfileId, params) (re)starts the clock and returns the recorded run id; getRun(runId) returns null for any other id, otherwise the recorded RunView with status 'running' until finished and then the recorded status, startedAt = replayStart as ISO, finishedAt only when finished, signalCount 0 and sources shown as status 'running' with fetchedCount 0 until finished, then the recorded values; listEvents(runId, afterId) returns the visible events with id greater than afterId (createdAt rewritten to replayStart plus the scaled offset); setRunStatus, upsertRunSource and addEvent are no-ops; storeSignals returns { inserted: 0, updated: 0 }; failStaleRuns returns 0.
+- leadStore: listLeads(runId, includeAll) from the fixture leads (default only buyer_intent and competitor_complaint) and getLeadDetail(leadId) from details, both honouring in-memory status changes; setLeadStatus and addFeedback only update an in-memory status map (nothing is persisted; setLeadStatus returns false for an unknown lead); getScoringContext and saveLeads throw new Error('Not available in demo mode'). A run id other than the recorded one gives an empty list or null.
+
+### 28.5 Wiring
+- PipelineDeps gets optional `runner?: (deps: PipelineDeps, runId: string, params: RunParams) => Promise<void>` and optional `demoMode?: boolean`. POST /runs in routes/runs.ts calls `(deps.runner ?? runPipeline)(deps, runId, params)`; when demoMode is true it skips the params.sources availability check. Without these fields behaviour is exactly as before (all existing tests pass unchanged).
+- index.ts: when env.DEMO_MODE is true, read and validate fixtures/demo-run.json (readFileSync via fileURLToPath like config/demo.ts). If it is missing or invalid print "Demo mode needs fixtures/demo-run.json. Record one with: npm run demo:record -- --run <run id>" plus the validation message and exit with code 1. Otherwise build the replay and use its stores for the runs, leads and report routers with adapters [], demoMode true and a runner that does nothing. In demo mode do not create the Supabase client, the LLM client, the classify stage or the score stage, do not mount the decisions route and skip failStaleRuns. When DEMO_MODE is false everything is unchanged. `GET /health` answers { status: 'ok', demo: boolean }.
+
+### 28.6 Web
+- api.ts: getHealth() returning { status, demo }. A new component DemoBanner, rendered at the top of App above the header, appears only when demo is true: "Demo mode: you are viewing a recorded run. No live search or AI calls are being made." (role="status"). If the health call fails, show nothing and no error.
+- The banner stays visible when printing (styles in tokens.css).
+- ReportPage "How to read this report" gains one sentence: "Buying-intent signals are listed before competitor complaints; within each group, signals are ordered by score."
+
+### 28.7 Files
+apps/api/src/demo/schema.ts, demo/replay.ts, scripts/demo-record.ts, orchestrator/runPipeline.ts (PipelineDeps), routes/runs.ts, index.ts, apps/api/package.json and root package.json (script entries only), web lib/api.ts, components/DemoBanner.tsx, app/App.tsx, pages/ReportPage.tsx, styles/tokens.css, plus tests. Do not create or edit fixtures/demo-run.json (the human records it).
+
 

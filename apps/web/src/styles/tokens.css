@@ -98,6 +98,15 @@ h3 {
   border-bottom: 1px solid var(--border);
 }
 
+.demo-banner {
+  padding: 10px 16px;
+  text-align: center;
+  color: var(--text);
+  background: var(--warning-soft);
+  border-bottom: 1px solid var(--warning);
+  font-weight: 500;
+}
+
 .brand {
   font-size: 20px;
   font-weight: 500;
@@ -729,6 +738,13 @@ td {
   }
 
   .report-sample-banner {
+    display: block !important;
+    color: #000;
+    background: #fff;
+    border: 2px solid #000;
+  }
+
+  .demo-banner {
     display: block !important;
     color: #000;
     background: #fff;

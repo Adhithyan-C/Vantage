@@ -31,7 +31,7 @@ export function createRunsRouter(
       }
 
       const { seller, params } = parsed.data;
-      const unavailableSource = params.sources?.find(
+      const unavailableSource = deps.demoMode ? undefined : params.sources?.find(
         (source) => !deps.adapters.some((adapter) => adapter.id === source),
       );
       if (unavailableSource) {
@@ -45,7 +45,7 @@ export function createRunsRouter(
         const sellerId = await store.createSellerProfile(seller);
         const runId = await store.createRun(sellerId, params);
         res.status(202).json({ runId });
-        void runPipeline(deps, runId, params).catch((err: unknown) => {
+        void (deps.runner ?? runPipeline)(deps, runId, params).catch((err: unknown) => {
           console.error(`Pipeline error: ${errorMessage(err)}`);
         });
       } catch (err) {
@@ -107,7 +107,7 @@ export function createRunsRouter(
     }
   });
 
-  router.get('/runs/:runId/decisions', async (req, res) => {
+  if (!deps.demoMode) router.get('/runs/:runId/decisions', async (req, res) => {
     try {
       const runId = req.params.runId;
       if (typeof runId !== 'string' || !UUID_RE.test(runId)) {

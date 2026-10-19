@@ -15,6 +15,7 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "vitest run",
     "scout": "npm run scout --workspace @vantage/api --",
+    "demo:record": "npm run demo:record --workspace @vantage/api --",
     "llm:check": "npm run llm:check --workspace @vantage/api --",
     "eval:sample": "npm run eval:sample --workspace @vantage/api --"
   },

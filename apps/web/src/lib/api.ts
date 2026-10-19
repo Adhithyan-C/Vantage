@@ -2,6 +2,10 @@ import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest
 
 const BASE = '/api';
 
+export function getHealth(): Promise<{ status: string; demo: boolean }> {
+  return request<{ status: string; demo: boolean }>('/health');
+}
+
 export class ApiError extends Error {
   readonly status: number;
   readonly issues: string[];
