@@ -49,6 +49,23 @@ export const RunParamsSchema = z.object({
   keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
   sinceDays: z.number().int().min(1).max(365),
   maxResults: z.number().int().min(1).max(100),
+  sources: z.array(z.enum(SOURCE_IDS)).min(1).optional(),
+});
+
+export const SampleDatasetSchema = z.object({
+  synthetic: z.literal(true),
+  description: z.string(),
+  expectedCounts: z.record(z.string(), z.number()),
+  items: z.array(z.object({
+    id: z.string(),
+    authorHandle: z.string(),
+    community: z.string(),
+    text: z.string().min(20),
+    daysAgo: z.number().int().min(0),
+    engagement: z.object({ score: z.number(), comments: z.number() }),
+    expectedLabel: z.enum(LEAD_LABELS),
+    note: z.string(),
+  })),
 });
 
 export const RunCreateRequestSchema = z.object({

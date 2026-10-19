@@ -65,7 +65,10 @@ export async function runPipeline(
   runId: string,
   params: RunParams,
 ): Promise<void> {
-  const { store, adapters, ctx } = deps;
+  const { store, ctx } = deps;
+  const adapters = params.sources
+    ? deps.adapters.filter((adapter) => params.sources?.includes(adapter.id))
+    : deps.adapters.filter((adapter) => adapter.id !== 'snapshot');
   const emit = createEmitter(store, runId);
 
   try {

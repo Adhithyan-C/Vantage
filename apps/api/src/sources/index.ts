@@ -1,10 +1,12 @@
 import type { SourceId } from '@vantage/shared';
 import type { SourceAdapter } from './types.js';
 import { hackerNewsAdapter } from './hackernews.js';
+import { createSnapshotAdapter } from './snapshot.js';
 import { SOURCE_CONFIG } from '../config/sources.js';
 
 export const ADAPTERS: Partial<Record<SourceId, SourceAdapter>> = {
   hackernews: hackerNewsAdapter,
+  snapshot: createSnapshotAdapter(),
 };
 
 export function getEnabledAdapters(): SourceAdapter[] {

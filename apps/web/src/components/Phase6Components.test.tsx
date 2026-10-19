@@ -5,6 +5,8 @@ import { SignalCard } from './SignalCard';
 import { ScoreBreakdown } from './ScoreBreakdown';
 import { CriteriaChecklist } from './CriteriaChecklist';
 import { DiscardedQuotesNote } from '../pages/SignalDetailPage';
+import { EMPTY_FORM, buildRequest, SetupPage } from '../pages/SetupPage';
+import { SOURCE_LABEL } from '../lib/format';
 
 const ranked: LeadView = {
   leadId: 'id', signalId: 'signal', rank: 1, label: 'buyer_intent', score: 63,
@@ -53,6 +55,31 @@ describe('Phase 6 server-rendered components', () => {
     expect(unknown).not.toContain('Evidence check');
     expect(unknown).not.toContain('Quotes verified');
     expect(unknown).not.toContain('Some quotes could not be verified');
+  });
+
+  it('labels snapshot cards as sample data and removes their original-post link', () => {
+    const sample = renderToString(<SignalCard signal={{ ...ranked, source: 'snapshot' }} runId="run" />);
+    const live = renderToString(<SignalCard signal={ranked} runId="run" />);
+    expect(sample).toContain('Sample data');
+    expect(sample).toContain('Sample dataset (synthetic)');
+    expect(sample).toContain('Sample post (not a real link)');
+    expect(sample).not.toContain('Open original post');
+    expect(sample).not.toContain('href="https://example.test"');
+    expect(live).not.toContain('Sample data');
+    expect(live).toContain('Open original post');
+  });
+
+  it('includes the selected sources in setup requests and blocks an empty selection', () => {
+    const request = buildRequest(EMPTY_FORM, ['hackernews', 'snapshot']);
+    expect(request).toMatchObject({ params: { sources: ['hackernews', 'snapshot'] } });
+    expect(buildRequest(EMPTY_FORM, [])).toBeNull();
+    const setup = renderToString(<SetupPage />);
+    expect(setup).toContain('Labelled test posts written for Vantage. They are not real posts and ignore your keywords.');
+    expect(setup).toContain('Sample dataset (synthetic)');
+  });
+
+  it('uses the explicit synthetic source label', () => {
+    expect(SOURCE_LABEL.snapshot).toBe('Sample dataset (synthetic)');
   });
 
   it('renders score rows and total only for ranked signals', () => {

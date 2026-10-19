@@ -9,6 +9,7 @@ export function SignalCard({ signal, runId }: { signal: LeadView; runId: string 
       <div className="signal-card-top">
         {ranked && <span className="badge">Rank {signal.rank}</span>}
         <span className="badge">{LABEL_TEXT[signal.label]}</span>
+        {signal.source === 'snapshot' && <span className="badge">Sample data</span>}
         {ranked ? <span className="badge">Score {signal.score}</span> : <span className="badge">Not ranked</span>}
         {signal.status === 'rejected' && <span className="badge status-rejected">Rejected</span>}
         {signal.status === 'accepted' && <span className="badge status-accepted">Accepted</span>}
@@ -23,7 +24,9 @@ export function SignalCard({ signal, runId }: { signal: LeadView; runId: string 
       </p>
       <p>{signal.rationale}</p>
       <div className="signal-links">
-        <a href={signal.url} target="_blank" rel="noopener noreferrer">Open original post</a>
+        {signal.source === 'snapshot'
+          ? <span>Sample post (not a real link)</span>
+          : <a href={signal.url} target="_blank" rel="noopener noreferrer">Open original post</a>}
         <a href={`#/runs/${encodeURIComponent(runId)}/signals/${encodeURIComponent(signal.leadId)}`}>View signal details</a>
       </div>
     </article>

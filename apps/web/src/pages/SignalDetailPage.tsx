@@ -68,12 +68,16 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
       <section className="card stack" aria-labelledby="signal-title">
         <div className="signal-card-top">
           <span className="badge">{LABEL_TEXT[lead.label]}</span>
+          {lead.source === 'snapshot' && <span className="badge">Sample data</span>}
           {ranked ? <><span className="badge">Rank {lead.rank}</span><span className="badge">Score {lead.score}</span></> : <span className="badge">Not ranked</span>}
           <span className={`badge status-${lead.status}`}>{lead.status === 'new' ? 'New' : lead.status === 'accepted' ? 'Accepted' : 'Rejected'}</span>
         </div>
         <h1 className="page-title" id="signal-title">@{lead.authorHandle}</h1>
         <p className="muted">{SOURCE_LABEL[lead.source]}{lead.community ? ` · ${lead.community}` : ''} · {formatAge(lead.createdAtSource, Date.now())}</p>
-        <p><a href={lead.url} target="_blank" rel="noopener noreferrer">Open original post</a></p>
+        {lead.source === 'snapshot'
+          ? <p>Sample post (not a real link)</p>
+          : <p><a href={lead.url} target="_blank" rel="noopener noreferrer">Open original post</a></p>}
+        {lead.source === 'snapshot' && <p className="muted">This is a synthetic sample post written for testing.</p>}
         <p className="muted">Vantage shows public posts only. It does not provide contact details or send messages.</p>
         <div className="feedback-actions" aria-label="Signal status actions">
           <button className="btn btn-primary" type="button" disabled={pending} onClick={() => void updateFeedback('accept')}>Accept</button>

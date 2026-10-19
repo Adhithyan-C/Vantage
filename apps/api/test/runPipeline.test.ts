@@ -120,12 +120,58 @@ function fakeAdapter(id: SourceId, result: AdapterResult): SourceAdapter {
   };
 }
 
-async function run(store: FakeStore, adapters: SourceAdapter[]): Promise<void> {
+async function run(
+  store: FakeStore,
+  adapters: SourceAdapter[],
+  runParams: RunParams = params,
+): Promise<void> {
   const deps: PipelineDeps = { store, adapters, ctx };
-  await runPipeline(deps, RUN_ID, params);
+  await runPipeline(deps, RUN_ID, runParams);
+}
+
+function recordingAdapter(id: SourceId, searched: SourceId[]): SourceAdapter {
+  return {
+    id,
+    async search() {
+      searched.push(id);
+      return { signals: [], status: 'ok' };
+    },
+  };
 }
 
 describe('runPipeline', () => {
+  it('excludes the snapshot adapter when source selection is omitted', async () => {
+    const store = new FakeStore();
+    const searched: SourceId[] = [];
+    await run(store, [recordingAdapter('hackernews', searched), recordingAdapter('snapshot', searched)]);
+    expect(searched).toEqual(['hackernews']);
+    expect(new Set(store.sourceCalls.map((call) => call.source))).toEqual(new Set(['hackernews']));
+  });
+
+  it.each([
+    [['snapshot'], ['snapshot']],
+    [['hackernews', 'snapshot'], ['hackernews', 'snapshot']],
+  ] as const)('runs only the selected adapters %j', async (sources, expected) => {
+    const store = new FakeStore();
+    const searched: SourceId[] = [];
+    await run(
+      store,
+      [recordingAdapter('hackernews', searched), recordingAdapter('snapshot', searched)],
+      { ...params, sources: [...sources] },
+    );
+    expect(searched).toEqual(expected);
+  });
+
+  it('uses the no-sources path when selected sources have no available adapter', async () => {
+    const store = new FakeStore();
+    await run(store, [fakeAdapter('hackernews', { signals: [], status: 'ok' })], {
+      ...params,
+      sources: ['devforums'],
+    });
+    expect(store.statusCalls.at(-1)?.status).toBe('failed');
+    expect(store.events.at(-1)?.message).toBe('No sources are enabled');
+  });
+
   it('completes a run with one ok source and emits the events in order', async () => {
     const store = new FakeStore();
     store.storeSignalsResult = { inserted: 2, updated: 0 };

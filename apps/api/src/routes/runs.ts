@@ -31,6 +31,16 @@ export function createRunsRouter(
       }
 
       const { seller, params } = parsed.data;
+      const unavailableSource = params.sources?.find(
+        (source) => !deps.adapters.some((adapter) => adapter.id === source),
+      );
+      if (unavailableSource) {
+        res.status(400).json({
+          error: 'Invalid request',
+          issues: [`params.sources: ${unavailableSource} is not available`],
+        });
+        return;
+      }
       try {
         const sellerId = await store.createSellerProfile(seller);
         const runId = await store.createRun(sellerId, params);

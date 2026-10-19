@@ -1087,4 +1087,37 @@ API: verification/verifyQuote.ts, db/leads.ts, routes/leads.ts, index.ts, packag
 
 The classifier's `classified` count includes reused decisions, so enricher progress uses that count directly and scoring runs only when it is greater than zero. Rank badges appear only for buyer-intent and competitor-complaint signals, and the no-ranked-signals scorer event is informational so the stage completes normally. Signal cards show “Quotes verified” at full confidence, “Some quotes could not be verified” below full confidence, and no verification wording when confidence is unavailable.
 
+---
+
+## 26. Phase 7A: sample dataset source, source selection, evaluation (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 26.1 Decision and honesty rules
+Live Hacker News search returns almost no real buyers for B2B tools, so a SYNTHETIC labelled dataset (`fixtures/sample-signals.json`, written by the human) is added as source `snapshot`. It is for demos and evaluation only. Every place that shows a snapshot signal must say it is sample data, and it must never look like a real post: no “Open original post” link, a visible “Sample data” badge, and the source name “Sample dataset (synthetic)”. No LLM calls in the adapter. No new packages, no migration.
+
+### 26.2 Shared
+- `RunParamsSchema` gains an optional `sources: z.array(z.enum(SOURCE_IDS)).min(1).optional()` (existing tests and demo params stay valid). Everything that infers `RunParams` picks it up.
+- `SampleDatasetSchema` (shared, exported): `{ synthetic: z.literal(true), description: string, expectedCounts: record of numbers, items: array of { id: string, authorHandle: string, community: string, text: string (min 20), daysAgo: int >= 0, engagement: { score: number, comments: number }, expectedLabel: enum LEAD_LABELS, note: string } }`. Type `SampleDataset`.
+
+### 26.3 Adapter (`apps/api/src/sources/snapshot.ts`)
+`createSnapshotAdapter({ readFile?, path? })` returns a `SourceAdapter` with id `snapshot`. It reads `fixtures/sample-signals.json` with `readFileSync` via `fileURLToPath(new URL(...))` like `config/demo.ts` does (injectable for tests), validates with `SampleDatasetSchema`, and returns up to `query.maxResults` items in file order as `RawSignal`: source `snapshot`, externalId = item.id, authorHandle, community, url = `sample://signal/${id}`, text, createdAt = (`ctx.now()` minus daysAgo days) as ISO string, engagement. It ignores keywords and sinceDays (document this in a comment). A missing or invalid file gives `{ signals: [], status: 'failed', error: <message via instanceof Error> }`; never throws. Register it in `sources/index.ts` under `snapshot` and set `SOURCE_CONFIG.enabled.snapshot` to true.
+
+### 26.4 Source selection (`routes/runs.ts`, `orchestrator/runPipeline.ts`)
+- `POST /runs`: when `params.sources` is present, every id must belong to a registered adapter (use the adapter list in deps). Otherwise answer `400 { error: 'Invalid request', issues: ['params.sources: <id> is not available'] }`.
+- `runPipeline`: adapters used for a run are `params.sources ? adapters.filter(a => params.sources.includes(a.id)) : adapters.filter(a => a.id !== 'snapshot')`. Without `sources`, a run behaves as before (sample data is never included by default). If the filtered list is empty, use the existing “No sources are enabled” path. All existing pipeline tests pass unchanged.
+
+### 26.5 Web: honesty and selection
+- `lib/format.ts`: `SOURCE_LABEL.snapshot` becomes “Sample dataset (synthetic)”.
+- `SetupPage`: the Sources panel has real controls: a checked, enabled checkbox “Hacker News” (live); an unchecked checkbox “Sample dataset (synthetic)” with the hint “Labelled test posts written for Vantage. They are not real posts and ignore your keywords.” Reddit, Developer forums and Review sites stay as read-only “Unavailable” rows. The request sends `params.sources` as the checked ids; at least one must be checked (inline error otherwise). “Load demo seller” does not change the checkboxes.
+- `SignalCard` and the signal detail header show a “Sample data” badge for source `snapshot` and replace “Open original post” with the plain text “Sample post (not a real link)”. The detail page also shows a one-line note: “This is a synthetic sample post written for testing.” RunPage's source list uses the new label.
+- Update or add component tests accordingly (badge present for snapshot, absent for Hacker News; link absent for snapshot; setup request includes sources).
+
+### 26.6 Evaluation script
+- Pure metrics in `apps/api/src/evaluation/metrics.ts`: `confusionMatrix(pairs: Array<{ expected: LeadLabel; predicted: LeadLabel }>)` returns counts[expected][predicted] for all four labels; `perLabelStats(matrix)` returns precision, recall and support per label (0 when the denominator is 0, never NaN); `accuracy(pairs)`.
+- Script `apps/api/src/scripts/eval-sample.ts`, npm scripts `eval:sample` in `apps/api/package.json` and root `package.json` (same style as `scout`; these two script entries are the only package.json changes allowed). Options via `node:util` `parseArgs`: `--limit N` (default 36). It loads the repo-root `.env` like `llm-check.ts` does, builds the LLM client from env (`config/llm.ts`), loads the sample dataset and demo seller (`loadDemoSeller`), and for each item (sequentially) builds the classifier prompt (current prompt version), calls the client with `ClassifierOutputSchema`, then `finalizeClassification` against the item's text. It never touches the database. Print one line per item: id, expected, predicted (or FAILED with sanitized reason), a mark, and “quote-check: ok” or “quote-check: N discarded”. Then print accuracy, the 4x4 confusion matrix, per-label precision, recall and support, counts of failed items and discarded quotes, and predicted labels of injection items s32 and s33 with an explicit line stating whether either was labelled buyer_intent. Failed items are excluded from the matrix and reported separately. Exit code 1 when more than half the items failed. Never print keys, prompts or full post text.
+
+### 26.7 Files
+Shared: `packages/shared` (`schemas.ts`, `types.ts`). API: `sources/snapshot.ts`, `sources/index.ts`, `config/sources.ts`, `routes/runs.ts`, `orchestrator/runPipeline.ts`, `evaluation/metrics.ts`, `scripts/eval-sample.ts`, `apps/api/package.json` and root `package.json` (script entries only). Web: `lib/format.ts`, `pages/SetupPage.tsx`, `pages/SignalDetailPage.tsx`, `components/SignalCard.tsx`, plus tests. `fixtures/sample-signals.json` is not to be edited.
+
 

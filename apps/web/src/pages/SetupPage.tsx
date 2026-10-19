@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import type { ChangeEvent, FormEvent, ReactNode } from 'react';
 import { RunCreateRequestSchema } from '@vantage/shared';
+import type { SourceId } from '@vantage/shared';
 import { navigate } from '../app/routes';
 import { ErrorState } from '../components/ErrorState';
 import { ApiError, createRun, getDemoSeller } from '../lib/api';
 
-interface FormState {
+export interface FormState {
   productName: string;
   problemDescription: string;
   idealCustomer: string;
@@ -17,7 +18,7 @@ interface FormState {
 
 type FieldErrors = Record<string, string>;
 
-const EMPTY_FORM: FormState = {
+export const EMPTY_FORM: FormState = {
   productName: '',
   problemDescription: '',
   idealCustomer: '',
@@ -27,11 +28,10 @@ const EMPTY_FORM: FormState = {
   maxResults: '50',
 };
 
-const SOURCE_NOTES: Array<{ label: string; note: string; live: boolean }> = [
-  { label: 'Hacker News', note: 'Live', live: true },
-  { label: 'Reddit', note: 'Not connected (waiting for API access)', live: false },
-  { label: 'Developer forums', note: 'Coming later', live: false },
-  { label: 'Review sites', note: 'Saved snapshot, coming later', live: false },
+const UNAVAILABLE_SOURCES: Array<{ label: string; note: string }> = [
+  { label: 'Reddit', note: 'Not connected (waiting for API access)' },
+  { label: 'Developer forums', note: 'Coming later' },
+  { label: 'Review sites', note: 'Coming later' },
 ];
 
 function splitList(value: string): string[] {
@@ -41,7 +41,10 @@ function splitList(value: string): string[] {
     .filter((part) => part.length > 0);
 }
 
-function buildRequest(form: FormState): unknown {
+export function buildRequest(form: FormState, sources: SourceId[]): unknown | null {
+  if (sources.length === 0) {
+    return null;
+  }
   const idealCustomer = form.idealCustomer.trim();
   return {
     seller: {
@@ -54,6 +57,7 @@ function buildRequest(form: FormState): unknown {
       keywords: splitList(form.keywords),
       sinceDays: Number(form.sinceDays),
       maxResults: Number(form.maxResults),
+      sources,
     },
   };
 }
@@ -109,6 +113,8 @@ function Field({ id, label, hint, error, children }: FieldProps) {
 
 export function SetupPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [selectedSources, setSelectedSources] = useState<SourceId[]>(['hackernews']);
+  const [sourceError, setSourceError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [loadingDemo, setLoadingDemo] = useState(false);
@@ -124,6 +130,15 @@ export function SetupPage() {
   const errorOf = (key: string): string | undefined => fieldErrors[key];
   const describedBy = (id: string, key: string): string =>
     errorOf(key) ? `${id}-error` : `${id}-hint`;
+
+  function updateSource(source: SourceId, checked: boolean): void {
+    setSelectedSources((current) => checked
+      ? current.includes(source) ? current : [...current, source]
+      : current.filter((item) => item !== source));
+    if (checked) {
+      setSourceError('');
+    }
+  }
 
   async function handleLoadDemo(): Promise<void> {
     setLoadingDemo(true);
@@ -155,7 +170,13 @@ export function SetupPage() {
     event.preventDefault();
     setSubmitError(null);
 
-    const parsed = RunCreateRequestSchema.safeParse(buildRequest(form));
+    const request = buildRequest(form, selectedSources);
+    if (request === null) {
+      setSourceError('Select at least one source.');
+      setFieldErrors({});
+      return;
+    }
+    const parsed = RunCreateRequestSchema.safeParse(request);
     if (!parsed.success) {
       setFieldErrors(collectErrors(parsed.error.issues));
       return;
@@ -339,16 +360,45 @@ export function SetupPage() {
 
           <h2 className="card-subtitle">Sources</h2>
           <ul className="source-list">
-            {SOURCE_NOTES.map((source) => (
+            <li className="source-row">
+              <label htmlFor="source-hackernews">
+                <input
+                  id="source-hackernews"
+                  type="checkbox"
+                  checked={selectedSources.includes('hackernews')}
+                  onChange={(event) => updateSource('hackernews', event.target.checked)}
+                />
+                Hacker News
+              </label>
+              <span className="badge badge-live">Live</span>
+            </li>
+            <li className="source-row">
+              <div>
+                <label htmlFor="source-snapshot">
+                  <input
+                    id="source-snapshot"
+                    type="checkbox"
+                    checked={selectedSources.includes('snapshot')}
+                    aria-describedby="source-snapshot-hint"
+                    onChange={(event) => updateSource('snapshot', event.target.checked)}
+                  />
+                  Sample dataset (synthetic)
+                </label>
+                <p className="muted field-hint" id="source-snapshot-hint">
+                  Labelled test posts written for Vantage. They are not real posts and ignore your keywords.
+                </p>
+              </div>
+              <span className="badge badge-planned">Sample data</span>
+            </li>
+            {UNAVAILABLE_SOURCES.map((source) => (
               <li key={source.label} className="source-row">
                 <span className="source-name">{source.label}</span>
-                <span className={source.live ? 'badge badge-live' : 'badge badge-planned'}>
-                  {source.live ? 'Live' : 'Unavailable'}
-                </span>
+                <span className="badge badge-planned">Unavailable</span>
                 <span className="muted">{source.note}</span>
               </li>
             ))}
           </ul>
+          {sourceError && <p className="field-error" role="alert">{sourceError}</p>}
 
           {submitError && (
             <ErrorState

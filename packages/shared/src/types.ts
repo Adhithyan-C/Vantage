@@ -17,6 +17,7 @@ import {
   ScoreBreakdownSchema,
   RunParamsSchema,
   RunCreateRequestSchema,
+  SampleDatasetSchema,
   FeedbackRequestSchema
 } from './schemas';
 import type { FEEDBACK_ACTIONS } from './constants';
@@ -100,6 +101,7 @@ export type EventKind = (typeof EVENT_KINDS)[number];
 export type AgentId = (typeof AGENTS)[number];
 export type RunParams = z.infer<typeof RunParamsSchema>;
 export type RunCreateRequest = z.infer<typeof RunCreateRequestSchema>;
+export type SampleDataset = z.infer<typeof SampleDatasetSchema>;
 
 export interface RunSourceView {
   source: SourceId;
