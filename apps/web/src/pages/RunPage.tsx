@@ -85,7 +85,10 @@ export function RunPage({ runId }: { runId: string }) {
               hint="Try different keywords or a longer time window."
             />
           ) : (
-            <p><a className="btn btn-primary" href={`#/runs/${encodeURIComponent(run.id)}/signals`}>View signals</a></p>
+            <p className="report-actions">
+              <a className="btn btn-primary" href={`#/runs/${encodeURIComponent(run.id)}/signals`}>View signals</a>
+              <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a>
+            </p>
           )}
         </section>
       )}

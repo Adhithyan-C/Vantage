@@ -3,6 +3,7 @@ import { RunPage } from '../pages/RunPage';
 import { SetupPage } from '../pages/SetupPage';
 import { InboxPage } from '../pages/InboxPage';
 import { SignalDetailPage } from '../pages/SignalDetailPage';
+import { ReportPage } from '../pages/ReportPage';
 import { useRoute } from './routes';
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
         {route.name === 'signal' && (
           <SignalDetailPage key={route.leadId} runId={route.runId} leadId={route.leadId} />
         )}
+        {route.name === 'report' && <ReportPage key={route.runId} runId={route.runId} />}
         {route.name === 'not-found' && (
           <EmptyState
             title="Page not found"

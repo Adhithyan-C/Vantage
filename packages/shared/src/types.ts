@@ -127,6 +127,23 @@ export interface RunView {
   signalCount: number;
 }
 
+export interface ReportView {
+  generatedAt: string;
+  run: RunView;
+  summary: {
+    signalsFound: number;
+    buyingSignals: number;
+    byLabel: Record<LeadLabel, number>;
+    sampleData: boolean;
+  };
+  method: {
+    weights: Record<'intent' | 'fit' | 'recency' | 'engagement', number>;
+    recencyHalfLifeDays: number;
+    promptVersion: string;
+  };
+  signals: LeadView[];
+}
+
 export interface RunEvent {
   id: number;
   runId: string;

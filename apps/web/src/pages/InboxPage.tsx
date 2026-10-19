@@ -43,7 +43,7 @@ export function InboxPage({ runId }: { runId: string }) {
     return <ErrorState title="Could not load this run" message="Run not found." onRetry={() => void load()} />;
   }
   if (signals.length === 0) {
-    return <section className="stack"><a href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a><h1 className="page-title">{run.seller.productName}</h1><p className="muted">Run {shortId(run.id)}</p><div className="card">No signals were scored for this run yet</div></section>;
+    return <section className="stack"><a href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a><h1 className="page-title">{run.seller.productName}</h1><p className="muted">Run {shortId(run.id)}</p><p><a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a></p><div className="card">No signals were scored for this run yet</div></section>;
   }
 
   const counts = countSignalGroups(signals);
@@ -65,6 +65,7 @@ export function InboxPage({ runId }: { runId: string }) {
         <h1 className="page-title" id="inbox-title">{run.seller.productName}</h1>
         <p className="muted">Run {shortId(run.id)}</p>
         <p>{counts.buying} buying signals, {counts.other} other signals</p>
+        <p><a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a></p>
       </section>
       <section className="card filter-panel" aria-label="Signal filters">
         <div className="field-row">

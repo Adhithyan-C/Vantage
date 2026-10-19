@@ -1120,4 +1120,35 @@ Live Hacker News search returns almost no real buyers for B2B tools, so a SYNTHE
 ### 26.7 Files
 Shared: `packages/shared` (`schemas.ts`, `types.ts`). API: `sources/snapshot.ts`, `sources/index.ts`, `config/sources.ts`, `routes/runs.ts`, `orchestrator/runPipeline.ts`, `evaluation/metrics.ts`, `scripts/eval-sample.ts`, `apps/api/package.json` and root `package.json` (script entries only). Web: `lib/format.ts`, `pages/SetupPage.tsx`, `pages/SignalDetailPage.tsx`, `components/SignalCard.tsx`, plus tests. `fixtures/sample-signals.json` is not to be edited.
 
+---
+
+## 27. Phase 8A: report page and export (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 27.1 Scope and rules
+No LLM calls, no migration, no new packages. The user-visible word is "signal", never "lead". Sample data is always disclosed (section 26). Nothing in the report may suggest that Vantage provides contact details or sends messages.
+
+### 27.2 Shared types (packages/shared)
+ReportView = { generatedAt: string; run: RunView; summary: { signalsFound: number; buyingSignals: number; byLabel: Record<LeadLabel, number>; sampleData: boolean }; method: { weights: Record<'intent' | 'fit' | 'recency' | 'engagement', number>; recencyHalfLifeDays: number; promptVersion: string }; signals: LeadView[] }. `signals` holds every scored signal of the run in rank order. buyingSignals counts buyer_intent and competitor_complaint. sampleData is true when any signal or run source is 'snapshot'.
+
+### 27.3 CSV (apps/api/src/report/csv.ts, pure functions)
+`toCsv(rows: Array<Array<string | number | null>>): string`:
+- Fields containing a comma, double quote, CR or LF are wrapped in double quotes with inner quotes doubled; line endings are CRLF; the output starts with a UTF-8 BOM (\uFEFF); null becomes an empty field; numbers are written as is.
+- Spreadsheet formula injection defence: a STRING cell whose first character is =, +, -, @, tab or carriage return is prefixed with a single quote (') before quoting. Numbers and null are never altered.
+`buildReportCsv(report: ReportView, includeAll: boolean): string` returns the header row exactly: rank, label, score, confidence_percent, status, source, community, author, posted_at, age_days, link, summary, evidence_quotes, criteria_passed, competitors_mentioned, purchase_terms, team_terms, comments, upvotes, data_origin, post_preview. Rows follow rank order. Only buyer_intent and competitor_complaint signals unless includeAll. For labels that are not ranked, rank, score and confidence_percent are empty. confidence_percent is the integer percent or empty when null. link is the original post URL for real sources and EMPTY for source 'snapshot'. data_origin is "live" or "sample (synthetic)". evidence_quotes joins the quotes of passed criteria with " | ". criteria_passed joins criterion ids with ";". The three term columns join with ";". post_preview is the stored text preview.
+
+### 27.4 Endpoints (apps/api/src/routes/report.ts, mounted in index.ts; the server must still start if creating them fails)
+Same runId validation and error bodies as the other routes. `GET /runs/:runId/report.json` returns 404 { error: 'Run not found' } when missing; 409 { error: 'Run is still running' } while status is 'running'; otherwise 200 ReportView (run from the run store, signals from the lead store with include all). `method.weights` comes from SCORE_WEIGHTS, recencyHalfLifeDays from config/scoring.ts, promptVersion from config/llm.ts. `GET /runs/:runId/report.csv?include=all` has the same 400, 404 and 409 behaviour; `include` is optional and the only valid value is 'all' (anything else 400 { error: 'Invalid include' }). Success is 200 with Content-Type "text/csv; charset=utf-8" and Content-Disposition `attachment; filename="vantage-report-<first 8 chars of run id>.csv"`, body from buildReportCsv. Build the report with one shared function `buildReport(runStore, leadStore, runId)` returning ReportView | 'not_found' | 'running'.
+
+### 27.5 Web (apps/web)
+Add route `{ name: 'report', runId }` for `#/runs/<uuid>/report` (parseHash stays pure and tested), "View report" buttons on the Inbox header and RunPage next to "View signals" after the run is finished with signals. Add `getReport(runId)` for `/api/runs/<id>/report.json`; CSV links are `/api/runs/<id>/report.csv` and `/api/runs/<id>/report.csv?include=all`.
+
+ReportPage order: (1) header "Signal report: <product name>", generated time, short run id, search terms and window, source list with Sample label where relevant; show the banner "This report includes synthetic sample data written for testing. Those signals are not real posts." when `summary.sampleData` is true. (2) Summary numbers for signals found, buying signals, counts per label. (3) "Ranked signals": buyer_intent and competitor_complaint in rank order with rank, label, score, "Quotes verified" / "Some quotes could not be verified", source, community, @handle, age, original link (plain "Sample post (not a real link)" for snapshot), "Summary (written by the model)", verified evidence quotes with criterion names, a compact score table (component, points, total), and a facts line (competitors mentioned, purchase terms). If none, show EmptyState "No buying signals in this run" with a sentence saying others were classified as venting or noise. (4) "Other signals": compact table of label, source, handle, age, summary, with "Not ranked" instead of a score. (5) "How to read this report": quotes were checked in code against stored post text; summary is model-written and is not evidence; score combines intent, fit, recency and engagement with `method.weights` rendered as percentages and the recency half-life; Vantage shows public posts only and does not provide contact details or send messages. (6) Buttons "Download CSV", "Download CSV with all signals", "Print or save as PDF" (`window.print()`), "Back to signals".
+
+States: loading, ErrorState with retry, running message "The report is available when the run has finished", and 404 "Run not found". Add a print block in tokens.css hiding app header, footer, nav, buttons and button-styled links; use white background, black text, 11pt; `break-inside: avoid` on signal cards and tables; show external URLs after links only in report container; keep the sample banner visible. No new libraries.
+
+### 27.6 Files
+packages/shared (types.ts), report/csv.ts, routes/report.ts, index.ts, web: app/routes.tsx, app/App.tsx, lib/api.ts, pages/ReportPage.tsx, pages/InboxPage.tsx, pages/RunPage.tsx, styles/tokens.css, plus tests. Do not touch fixtures.
+
 

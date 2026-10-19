@@ -12,6 +12,7 @@ import { createRunStore } from './db/runs';
 import { createLlmClient } from './llm/client';
 import { createRunsRouter } from './routes/runs';
 import { createLeadsRouter } from './routes/leads';
+import { createReportRouter } from './routes/report';
 import { defaultAdapterContext, getEnabledAdapters } from './sources/index';
 
 function errorMessage(err: unknown): string {
@@ -27,6 +28,7 @@ async function main(): Promise<void> {
   let decisionStore: ReturnType<typeof createDecisionStore> | undefined;
   let leadStore: ReturnType<typeof createLeadStore> | undefined;
   let leadsRouter: express.Router | undefined;
+  let reportRouter: express.Router | undefined;
   let score: ReturnType<typeof createScoreStage> | undefined;
   let classify: ReturnType<typeof createClassifyStage> | undefined;
   try {
@@ -48,6 +50,14 @@ async function main(): Promise<void> {
     leadsRouter = createLeadsRouter({ store: leadStore });
   } catch (err) {
     console.warn(`Warning: scorer is unavailable: ${errorMessage(err)}`);
+  }
+
+  try {
+    if (leadStore) {
+      reportRouter = createReportRouter({ runStore: store, leadStore });
+    }
+  } catch (err) {
+    console.warn(`Warning: report export is unavailable: ${errorMessage(err)}`);
   }
 
   try {
@@ -79,6 +89,9 @@ async function main(): Promise<void> {
   );
   if (leadsRouter) {
     app.use(leadsRouter);
+  }
+  if (reportRouter) {
+    app.use(reportRouter);
   }
 
   app.listen(env.PORT, () => {
