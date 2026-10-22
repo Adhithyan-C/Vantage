@@ -31,6 +31,8 @@ class FakeRunStore implements RunStore {
   }
   async getRun(_runId: string): Promise<RunView | null> { return null; }
   async listEvents(_runId: string, _afterId: number): Promise<RunEvent[]> { return []; }
+  async saveSourceRequests() {}
+  async listSourceRequests() { return []; }
   async setRunStatus(_runId: string, _status: RunStatus, _finished: boolean): Promise<void> {}
   async upsertRunSource(_runId: string, source: SourceId, _patch: SourcePatch): Promise<void> {
     this.sources.push(source);

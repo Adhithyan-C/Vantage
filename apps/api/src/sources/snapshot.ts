@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { SampleDatasetSchema } from '@vantage/shared';
 import type { RawSignal, SampleDataset } from '@vantage/shared';
 import type { SourceAdapter } from './types.js';
+import { sanitizeRequestError } from '../utils/redact.js';
 
 type SnapshotReadFile = (path: string, encoding: 'utf8') => string;
 
@@ -22,11 +23,17 @@ export function createSnapshotAdapter(options: SnapshotAdapterOptions = {}): Sou
   return {
     id: 'snapshot',
     async search(query, ctx) {
+      const startedAt = ctx.now().getTime();
+      let itemsReturned = 0;
+      let requestError: string | null = null;
+      let status: 'ok' | 'failed' = 'failed';
       try {
         const dataset: SampleDataset = SampleDatasetSchema.parse(JSON.parse(readFile(path, 'utf8')));
         // The sample dataset deliberately ignores keywords and sinceDays.
         const now = ctx.now().getTime();
-        const signals: RawSignal[] = dataset.items.slice(0, query.maxResults).map((item) => ({
+        const items = dataset.items.slice(0, query.maxResults);
+        itemsReturned = items.length;
+        const signals: RawSignal[] = items.map((item) => ({
           source: 'snapshot',
           externalId: item.id,
           authorHandle: item.authorHandle,
@@ -36,9 +43,27 @@ export function createSnapshotAdapter(options: SnapshotAdapterOptions = {}): Sou
           createdAt: new Date(now - item.daysAgo * 86_400_000).toISOString(),
           engagement: item.engagement,
         }));
+        status = 'ok';
         return { signals, status: 'ok' };
       } catch (err) {
-        return { signals: [], status: 'failed', error: errorMessage(err) };
+        const message = errorMessage(err);
+        requestError = sanitizeRequestError(message);
+        return { signals: [], status: 'failed', error: message };
+      } finally {
+        try {
+          ctx.onRequest?.({
+            source: 'snapshot',
+            label: 'fixture file',
+            status,
+            httpStatus: null,
+            durationMs: Math.max(0, ctx.now().getTime() - startedAt),
+            itemsReturned,
+            error: requestError,
+            quotaRemaining: null,
+          });
+        } catch {
+          // Request logging must not change adapter behavior.
+        }
       }
     },
   };

@@ -13,6 +13,12 @@ describe('DemoRunSchema', () => {
     expect([run.id, event.runId, lead.leadId, detail.runId]).toEqual([
       run.id, run.id, LEAD_ID, run.id,
     ]);
+    expect(parsed.requests).toEqual([]);
+  });
+
+  it('accepts a fixture containing request views', () => {
+    const parsed = DemoRunSchema.parse({ ...fixture(), requests: [{ id: 1, source: 'hackernews', label: 'support', status: 'ok', httpStatus: 200, durationMs: 3, itemsReturned: 2, error: null, quotaRemaining: null, createdAt: '2026-10-18T10:00:01.000Z' }] });
+    expect(parsed.requests).toHaveLength(1);
   });
 
   it('rejects a missing field, unknown label, unsupported version, and missing detail', () => {

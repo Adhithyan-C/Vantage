@@ -37,6 +37,8 @@ class PipelineStore implements RunStore {
   async createRun(_sellerProfileId: string, _params: RunParams): Promise<string> { return RUN_ID; }
   async getRun(_runId: string): Promise<RunView | null> { return null; }
   async listEvents(_runId: string, _afterId: number): Promise<RunEvent[]> { return []; }
+  async saveSourceRequests() {}
+  async listSourceRequests() { return []; }
   async setRunStatus(_runId: string, status: RunStatus, _finished: boolean): Promise<void> {
     this.statusCalls.push(status);
   }

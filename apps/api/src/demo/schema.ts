@@ -140,6 +140,19 @@ const DemoEventSchema = z.object({
   offsetMs: z.number().int().min(0),
 });
 
+const SourceRequestSchema = z.object({
+  id: z.number(),
+  source: z.enum(SOURCE_IDS),
+  label: z.string(),
+  status: z.enum(['ok', 'failed', 'skipped']),
+  httpStatus: z.number().nullable(),
+  durationMs: z.number(),
+  itemsReturned: z.number(),
+  error: z.string().nullable(),
+  quotaRemaining: z.number().nullable(),
+  createdAt: isoDate,
+});
+
 export const DemoRunSchema = z.object({
   version: z.literal(1),
   recordedAt: isoDate,
@@ -148,6 +161,7 @@ export const DemoRunSchema = z.object({
   events: z.array(DemoEventSchema),
   leads: z.array(LeadViewSchema),
   details: z.record(z.string(), LeadDetailSchema),
+  requests: z.array(SourceRequestSchema).default([]),
 }).refine(
   (fixture) => fixture.leads.every((lead) => Object.hasOwn(fixture.details, lead.leadId)),
   { message: 'Every recorded signal must have a detail entry', path: ['details'] },

@@ -103,6 +103,22 @@ export type RunParams = z.infer<typeof RunParamsSchema>;
 export type RunCreateRequest = z.infer<typeof RunCreateRequestSchema>;
 export type SampleDataset = z.infer<typeof SampleDatasetSchema>;
 
+export interface RequestRecord {
+  source: SourceId;
+  label: string;
+  status: 'ok' | 'failed' | 'skipped';
+  httpStatus: number | null;
+  durationMs: number;
+  itemsReturned: number;
+  error: string | null;
+  quotaRemaining: number | null;
+}
+
+export interface SourceRequestView extends RequestRecord {
+  id: number;
+  createdAt: string;
+}
+
 export interface RunSourceView {
   source: SourceId;
   status: SourceStatus;
@@ -134,8 +150,17 @@ export interface ReportView {
     signalsFound: number;
     buyingSignals: number;
     byLabel: Record<LeadLabel, number>;
+    bySource: Record<string, number>;
     sampleData: boolean;
   };
+  sources: Array<{
+    source: SourceId;
+    requestsOk: number;
+    requestsFailed: number;
+    itemsReturned: number;
+    signalsKept: number;
+    errors: string[];
+  }>;
   method: {
     weights: Record<'intent' | 'fit' | 'recency' | 'engagement', number>;
     recencyHalfLifeDays: number;

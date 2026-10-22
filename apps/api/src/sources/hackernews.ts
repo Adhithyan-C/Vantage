@@ -3,6 +3,15 @@ import type { RawSignal } from '@vantage/shared';
 import type { SourceAdapter, SourceQuery, AdapterContext, AdapterResult } from './types.js';
 import { htmlToText } from '../utils/text.js';
 import { fetchWithRetry } from '../utils/rateLimit.js';
+import { sanitizeRequestError } from '../utils/redact.js';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
 
 export const HN_ENDPOINT = 'https://hn.algolia.com/api/v1/search_by_date';
 
@@ -15,22 +24,24 @@ export function buildHnUrl(keyword: string, sinceUnix: number, hitsPerPage: numb
   return url.toString();
 }
 
-export function mapHit(hit: any): RawSignal | null {
-  if (!hit || typeof hit !== 'object') return null;
+export function mapHit(hit: unknown): RawSignal | null {
+  if (!isRecord(hit)) return null;
   const objectID = hit.objectID;
   const author = hit.author;
   if (!objectID || typeof objectID !== 'string') return null;
   if (!author || typeof author !== 'string' || author === '[deleted]') return null;
 
-  const tags = Array.isArray(hit._tags) ? hit._tags : [];
+  const tags = Array.isArray(hit._tags)
+    ? hit._tags.filter((tag): tag is string => typeof tag === 'string')
+    : [];
   const isComment = tags.includes('comment');
 
   let text = '';
   if (isComment) {
-    text = htmlToText(hit.comment_text ?? '');
+    text = htmlToText(typeof hit.comment_text === 'string' ? hit.comment_text : '');
   } else {
     const title = typeof hit.title === 'string' ? hit.title : '';
-    const storyText = htmlToText(hit.story_text ?? '');
+    const storyText = htmlToText(typeof hit.story_text === 'string' ? hit.story_text : '');
     const parts = [];
     if (title) parts.push(title);
     if (storyText) parts.push(storyText);
@@ -81,7 +92,11 @@ export const hackerNewsAdapter: SourceAdapter = {
     for (const keyword of query.keywords) {
       if (signals.length >= query.maxResults) break;
       attempted++;
-
+      const startedAt = ctx.now().getTime();
+      let httpStatus: number | null = null;
+      let itemsReturned = 0;
+      let requestStatus: 'ok' | 'failed' = 'failed';
+      let requestError: string | null = null;
       try {
         const url = buildHnUrl(keyword, sinceUnix, hitsPerPage);
         const response = await fetchWithRetry(ctx.fetch, url, {
@@ -90,14 +105,17 @@ export const hackerNewsAdapter: SourceAdapter = {
           maxRetries: ctx.maxRetries
         });
 
+        httpStatus = response.status;
         if (!response.ok) {
           throw new Error(`HN request failed with status ${response.status}`);
         }
 
-        const body: any = await response.json();
-        if (!body || typeof body !== 'object' || !Array.isArray(body.hits)) {
+        const body: unknown = await response.json();
+        if (!isRecord(body) || !Array.isArray(body.hits)) {
           throw new Error('HN response had no hits array');
         }
+        itemsReturned = body.hits.length;
+        requestStatus = 'ok';
 
         for (const hit of body.hits) {
           if (signals.length >= query.maxResults) break;
@@ -111,9 +129,26 @@ export const hackerNewsAdapter: SourceAdapter = {
             signals.push(parsed.data);
           }
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         failedRequests++;
-        if (!firstError) firstError = err.message || String(err);
+        const message = errorMessage(err);
+        if (!firstError) firstError = message;
+        requestError = sanitizeRequestError(message);
+      } finally {
+        try {
+          ctx.onRequest?.({
+            source: 'hackernews',
+            label: keyword,
+            status: requestStatus,
+            httpStatus,
+            durationMs: Math.max(0, ctx.now().getTime() - startedAt),
+            itemsReturned,
+            error: requestError,
+            quotaRemaining: null,
+          });
+        } catch {
+          // Request logging must not change adapter behavior.
+        }
       }
     }
 

@@ -93,6 +93,24 @@ export function ReportContent({ report }: { report: ReportView }) {
         <p>Competitor complaints: {report.summary.byLabel.competitor_complaint} · Venting: {report.summary.byLabel.venting} · Noise: {report.summary.byLabel.noise}</p>
       </section>
 
+      <section className="card" aria-labelledby="report-sources-title">
+        <h2 className="card-title" id="report-sources-title">Data sources</h2>
+        {report.sources.length === 0 ? <p className="muted">No source request data recorded.</p> : (
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>Source</th><th>Requests ok</th><th>Requests failed</th><th>Items returned</th><th>Signals kept</th></tr></thead>
+              <tbody>{report.sources.map((source) => <tr key={source.source}>
+                <td>{SOURCE_LABEL[source.source]}</td><td>{source.requestsOk}</td><td>{source.requestsFailed}</td>
+                <td>{source.itemsReturned}</td><td>{source.signalsKept}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+        )}
+        {report.sources.flatMap((source) => source.errors.map((error) => (
+          <p className="source-error" key={`${source.source}:${error}`}>{SOURCE_LABEL[source.source]}: {error}</p>
+        )))}
+      </section>
+
       <section className="stack" aria-labelledby="ranked-signals-title">
         <h2 className="card-title" id="ranked-signals-title">Ranked signals</h2>
         {rankedSignals.length > 0 ? rankedSignals.map((signal) => (

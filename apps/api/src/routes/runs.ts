@@ -107,6 +107,26 @@ export function createRunsRouter(
     }
   });
 
+  router.get('/runs/:runId/requests', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const run = await store.getRun(runId);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      const requests = await store.listSourceRequests(runId);
+      res.status(200).json({ requests });
+    } catch (err) {
+      console.error(`GET /runs/:runId/requests failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
   if (!deps.demoMode) router.get('/runs/:runId/decisions', async (req, res) => {
     try {
       const runId = req.params.runId;

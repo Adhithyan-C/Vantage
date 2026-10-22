@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { LeadView, RunView } from '@vantage/shared';
 import { getLeads, getRun } from '../lib/api';
-import { LABEL_TEXT, shortId } from '../lib/format';
-import { countSignalGroups, filterSignals } from '../lib/inbox';
-import type { LabelFilter, StatusFilter } from '../lib/inbox';
+import { LABEL_TEXT, shortId, SOURCE_LABEL } from '../lib/format';
+import { countSignalGroups, countSignalsBySource, filterSignals } from '../lib/inbox';
+import type { LabelFilter, SourceFilter, StatusFilter } from '../lib/inbox';
 import { ErrorState } from '../components/ErrorState';
 import { SignalCard } from '../components/SignalCard';
 
@@ -15,6 +15,7 @@ export function InboxPage({ runId }: { runId: string }) {
   const [showOtherSignals, setShowOtherSignals] = useState(false);
   const [label, setLabel] = useState<LabelFilter>('all');
   const [status, setStatus] = useState<StatusFilter>('all');
+  const [source, setSource] = useState<SourceFilter>('all');
   const [minScore, setMinScore] = useState('');
 
   const load = useCallback(async () => {
@@ -53,10 +54,11 @@ export function InboxPage({ runId }: { runId: string }) {
     label,
     status,
     minScore: parsedMinScore !== null && Number.isFinite(parsedMinScore) ? parsedMinScore : null,
-  });
+  }, source);
   const defaultRankedCount = filterSignals(signals, {
     showOtherSignals: false, label: 'all', status: 'all', minScore: null,
   }).length;
+  const sourceCounts = countSignalsBySource(signals);
 
   return (
     <div className="stack">
@@ -82,6 +84,14 @@ export function InboxPage({ runId }: { runId: string }) {
             <select className="control" value={status} onChange={(event) => setStatus(event.target.value as StatusFilter)}>
               <option value="all">All</option><option value="new">New</option>
               <option value="accepted">Accepted</option><option value="rejected">Rejected</option>
+            </select>
+          </label>
+          <label className="field"><span className="field-label">Source</span>
+            <select className="control" value={source} onChange={(event) => setSource(event.target.value as SourceFilter)}>
+              <option value="all">All ({signals.length})</option>
+              {sourceCounts.map(({ source: sourceId, count }) => (
+                <option key={sourceId} value={sourceId}>{SOURCE_LABEL[sourceId]} ({count})</option>
+              ))}
             </select>
           </label>
           <label className="field"><span className="field-label">Minimum score (ranked signals)</span>

@@ -68,6 +68,15 @@ export function createReplay({ fixture, now = Date.now, maxTotalMs = 30_000 }: R
             : new Date(replayStart + event.offsetMs * scale).toISOString(),
         }));
     },
+    async saveSourceRequests() {},
+    async listSourceRequests(runId) {
+      if (runId !== fixture.run.id) return [];
+      const elapsed = replayStart === null ? totalMs * scale : Math.max(0, now() - replayStart);
+      const scoutVisible = fixture.events.some(
+        (event) => event.agent === 'scout' && event.offsetMs * scale <= elapsed,
+      );
+      return scoutVisible ? fixture.requests : [];
+    },
     async setRunStatus() {},
     async upsertRunSource() {},
     async addEvent() {},

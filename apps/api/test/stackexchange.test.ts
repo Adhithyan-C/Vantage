@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { mapQuestion, createStackExchangeAdapter } from '../src/sources/stackexchange.js';
 import type { AdapterContext, SourceQuery } from '../src/sources/types.js';
+import type { RequestRecord } from '@vantage/shared';
 
 const NOW = new Date('2026-10-20T00:00:00.000Z');
 const query: SourceQuery = { keywords: ['helpdesk'], sinceDays: 30, maxResults: 10 };
@@ -255,5 +256,25 @@ describe('Stack Exchange adapter', () => {
     });
     await adapter.search({ ...query, keywords: ['one'] }, makeContext(fetchFn));
     expect(requestedSites).toEqual(['stackoverflow', 'softwarerecs', 'unix']);
+  });
+
+  it('records one request with site and keyword, raw item count and quota', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => jsonResponse(apiBody([question()], { quota_remaining: 88 }));
+    const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
+    await adapter.search(query, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ source: 'stackexchange', label: 'softwarerecs: helpdesk', status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: 88 });
+    expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('records sanitized errors without exposing a configured key', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => new Response('error', { status: 403 });
+    const adapter = createStackExchangeAdapter({ key: 'private-key', sites: ['softwarerecs'] });
+    await adapter.search(query, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'failed', httpStatus: 403, error: 'Stack Exchange request failed with status 403', quotaRemaining: null });
+    expect(JSON.stringify(records)).not.toContain('private-key');
   });
 });

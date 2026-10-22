@@ -5,6 +5,7 @@ import { promptVersion } from '../config/llm';
 import type { LeadStore } from '../db/leads';
 import type { RunStore } from '../db/runs';
 import { buildReportCsv } from '../report/csv';
+import { sanitizeRequestError } from '../utils/redact';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const LABELS: LeadLabel[] = ['buyer_intent', 'competitor_complaint', 'venting', 'noise'];
@@ -26,6 +27,7 @@ export async function buildReport(
     return 'running';
   }
   const signals = await leadStore.listLeads(runId, true);
+  const requests = await runStore.listSourceRequests(runId);
   const byLabel: Record<LeadLabel, number> = {
     buyer_intent: 0,
     competitor_complaint: 0,
@@ -35,6 +37,21 @@ export async function buildReport(
   for (const signal of signals) {
     byLabel[signal.label] += 1;
   }
+  const bySource: Record<string, number> = {};
+  for (const signal of signals) bySource[signal.source] = (bySource[signal.source] ?? 0) + 1;
+  const sources = [...new Set([...requests.map((request) => request.source), ...signals.map((signal) => signal.source)])]
+    .map((source) => {
+      const sourceRequests = requests.filter((request) => request.source === source);
+      const errors = [...new Set(sourceRequests.flatMap((request) => request.error ? [sanitizeRequestError(request.error)] : []))].slice(0, 5);
+      return {
+        source,
+        requestsOk: sourceRequests.filter((request) => request.status === 'ok').length,
+        requestsFailed: sourceRequests.filter((request) => request.status === 'failed').length,
+        itemsReturned: sourceRequests.reduce((total, request) => total + request.itemsReturned, 0),
+        signalsKept: signals.filter((signal) => signal.source === source).length,
+        errors,
+      };
+    });
   return {
     generatedAt: new Date().toISOString(),
     run,
@@ -42,10 +59,12 @@ export async function buildReport(
       signalsFound: signals.length,
       buyingSignals: byLabel.buyer_intent + byLabel.competitor_complaint,
       byLabel,
+      bySource,
       sampleData: run.params.sources?.includes('snapshot') === true ||
         run.sources.some((source) => source.source === 'snapshot') ||
         signals.some((signal) => signal.source === 'snapshot'),
     },
+    sources,
     method: {
       weights: SCORE_WEIGHTS,
       recencyHalfLifeDays: RECENCY_HALF_LIFE_DAYS,

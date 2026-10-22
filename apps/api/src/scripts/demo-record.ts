@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import type { LeadDetail, LeadView, RunEvent, RunView } from '@vantage/shared';
+import type { LeadDetail, LeadView, RunEvent, RunView, SourceRequestView } from '@vantage/shared';
 import { getEnv } from '../config/env';
 import { createDb } from '../db/client';
 import { createLeadStore } from '../db/leads';
@@ -18,6 +18,7 @@ export interface DemoFixtureInput {
   events: RunEvent[];
   leads: LeadView[];
   details: Record<string, LeadDetail>;
+  requests?: SourceRequestView[];
 }
 
 export function buildDemoFixture(input: DemoFixtureInput) {
@@ -35,6 +36,7 @@ export function buildDemoFixture(input: DemoFixtureInput) {
     events,
     leads: input.leads,
     details: input.details,
+    requests: input.requests ?? [],
   });
 }
 
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
   }
   const fixture = buildDemoFixture({
     recordedAt: new Date().toISOString(), run, events, leads, details,
+    requests: await runStore.listSourceRequests(values.run),
   });
   writeFileSync(outPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
   console.log(`Recorded ${fixture.events.length} events, ${fixture.leads.length} leads, ${Object.keys(fixture.details).length} details`);

@@ -69,4 +69,14 @@ describe('createReplay', () => {
     await expect(replay.leadStore.saveLeads(RUN_ID, [])).rejects.toThrow('Not available in demo mode');
     await expect(replay.leadStore.getScoringContext(RUN_ID)).rejects.toThrow('Not available in demo mode');
   });
+
+  it('reveals source requests after the first Scout event becomes visible', async () => {
+    let clock = 0;
+    const fixtureData = DemoRunSchema.parse({ ...fixture(), requests: [{ id: 1, source: 'hackernews', label: 'support', status: 'ok', httpStatus: 200, durationMs: 3, itemsReturned: 2, error: null, quotaRemaining: null, createdAt: '2026-10-18T10:00:01.000Z' }] });
+    const replay = createReplay({ fixture: fixtureData, now: () => clock });
+    await replay.runStore.createRun('seller', fixtureData.run.params);
+    expect(await replay.runStore.listSourceRequests(RUN_ID)).toEqual([]);
+    clock = 1000;
+    expect(await replay.runStore.listSourceRequests(RUN_ID)).toHaveLength(1);
+  });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildDemoFixture } from '../src/scripts/demo-record';
 import { detail, events, fixture, lead, run, startedAt } from './demoTestFixtures';
+import type { SourceRequestView } from '@vantage/shared';
 
 describe('buildDemoFixture', () => {
   it('sorts events, computes non-negative offsets, and labels the source run', () => {
@@ -19,5 +20,12 @@ describe('buildDemoFixture', () => {
     expect(result.events.map((event) => event.offsetMs)).toEqual([1000, 0]);
     expect(result.note).toBe('Recorded from run 12345678');
     expect(Date.parse(startedAt)).toBeLessThan(Date.parse(result.run.finishedAt ?? startedAt));
+  });
+
+  it('includes recorded source requests', () => {
+    const request: SourceRequestView = { id: 4, source: 'hackernews', label: 'support', status: 'ok', httpStatus: 200, durationMs: 1, itemsReturned: 2, error: null, quotaRemaining: null, createdAt: startedAt };
+    const source = fixture();
+    const result = buildDemoFixture({ recordedAt: source.recordedAt, run, events, leads: [lead], details: { [lead.leadId]: detail }, requests: [request] });
+    expect(result.requests).toEqual([request]);
   });
 });

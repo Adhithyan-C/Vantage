@@ -9,6 +9,7 @@ import type {
   RunView,
   SellerProfileInput,
   SourceId,
+  SourceRequestView,
 } from '@vantage/shared';
 import type { RunStore, SourcePatch } from '../src/db/runs';
 import type { LeadStore } from '../src/db/leads';
@@ -50,7 +51,7 @@ const run: RunView = {
   sources: [{ source: 'hackernews', status: 'ok', fetchedCount: 2, error: null }], signalCount: 2,
 };
 
-function createStores(options: { run?: RunView | null; signals?: LeadView[] } = {}) {
+function createStores(options: { run?: RunView | null; signals?: LeadView[]; requests?: SourceRequestView[] } = {}) {
   const currentRun = options.run === undefined ? run : options.run;
   const signals = options.signals ?? [ranked, sample];
   const runStore: RunStore = {
@@ -58,6 +59,8 @@ function createStores(options: { run?: RunView | null; signals?: LeadView[] } = 
     async createRun(_sellerProfileId: string, _params: RunParams) { return RUN_ID; },
     async getRun(_runId: string) { return currentRun; },
     async listEvents(_runId: string, _afterId: number): Promise<RunEvent[]> { return []; },
+    async saveSourceRequests() {},
+    async listSourceRequests() { return options.requests ?? []; },
     async setRunStatus(_runId: string, _status: RunStatus, _finished: boolean) {},
     async upsertRunSource(_runId: string, _source: SourceId, _patch: SourcePatch) {},
     async addEvent(_runId: string) {},
@@ -88,8 +91,10 @@ function reportFixture(signals: LeadView[] = [ranked, sample], sampleData = fals
         venting: signals.filter((signal) => signal.label === 'venting').length,
         noise: signals.filter((signal) => signal.label === 'noise').length,
       },
+      bySource: Object.fromEntries([...new Set(signals.map((signal) => signal.source))].map((source) => [source, signals.filter((signal) => signal.source === source).length])),
       sampleData,
     },
+    sources: [],
     method: { weights: { intent: 0.4, fit: 0.25, recency: 0.2, engagement: 0.15 }, recencyHalfLifeDays: 30, promptVersion: 'classifier.v2' },
     signals,
   };
@@ -130,7 +135,7 @@ async function invoke(
   path: string,
   params: Record<string, string>,
   query: Record<string, unknown> = {},
-  options: { run?: RunView | null; signals?: LeadView[] } = {},
+  options: { run?: RunView | null; signals?: LeadView[]; requests?: SourceRequestView[] } = {},
 ) {
   const stores = createStores(options);
   const router = createReportRouter(stores);
@@ -172,6 +177,24 @@ describe('report routes', () => {
     expect(normal.calls).toEqual([true]);
     const live = await invoke('/runs/:runId/report.json', { runId: RUN_ID }, {}, { signals: [ranked] });
     expect(live.body).toMatchObject({ summary: { sampleData: false } });
+  });
+
+  it('summarizes source requests, kept signals, errors and signal counts by source', async () => {
+    const result = await invoke('/runs/:runId/report.json', { runId: RUN_ID }, {}, {
+      signals: [ranked, sample],
+      requests: [
+        { id: 1, source: 'hackernews', label: 'support', status: 'ok', httpStatus: 200, durationMs: 20, itemsReturned: 2, error: null, quotaRemaining: null, createdAt: '2026-10-01T00:00:00Z' },
+        { id: 2, source: 'stackexchange', label: 'softwarerecs: support', status: 'failed', httpStatus: 502, durationMs: 30, itemsReturned: 0, error: 'request failed', quotaRemaining: 90, createdAt: '2026-10-01T00:00:01Z' },
+      ],
+    });
+    expect(result.body).toMatchObject({
+      summary: { bySource: { hackernews: 1, snapshot: 1 } },
+      sources: [
+        { source: 'hackernews', requestsOk: 1, requestsFailed: 0, itemsReturned: 2, signalsKept: 1, errors: [] },
+        { source: 'stackexchange', requestsOk: 0, requestsFailed: 1, itemsReturned: 0, signalsKept: 0, errors: ['request failed'] },
+        { source: 'snapshot', requestsOk: 0, requestsFailed: 0, itemsReturned: 0, signalsKept: 1, errors: [] },
+      ],
+    });
   });
 
   it('returns CSV headers and uses include=all to include unranked signals', async () => {

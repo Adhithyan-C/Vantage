@@ -1224,4 +1224,60 @@ sources/stackexchange.ts, sources/index.ts, config/sources.ts, config/env.ts, sc
 
 ---
 
+---
+
+## 30. Phase 7C: request log and provenance (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 30.1 Scope
+Record every outbound DATA request made by a source adapter during a run (not LLM calls), and show where each signal came from and which requests failed. No new packages. No secrets, keys or full URLs are ever stored or shown.
+
+### 30.2 Database (human runs it)
+New file supabase/migrations/0003_source_requests.sql:
+
+```sql
+create table source_requests (
+  id bigserial primary key,
+  run_id uuid not null references runs(id) on delete cascade,
+  source text not null,
+  label text not null,
+  status text not null check (status in ('ok','failed','skipped')),
+  http_status int,
+  duration_ms int not null default 0,
+  items_returned int not null default 0,
+  error text,
+  quota_remaining int,
+  created_at timestamptz not null default now()
+);
+create index source_requests_run_id_idx on source_requests (run_id);
+alter table source_requests enable row level security;
+```
+
+### 30.3 Shared and adapter context
+- packages/shared: type RequestRecord = { source: SourceId; label: string; status: 'ok' | 'failed' | 'skipped'; httpStatus: number | null; durationMs: number; itemsReturned: number; error: string | null; quotaRemaining: number | null } and SourceRequestView = RequestRecord & { id: number; createdAt: string }.
+- AdapterContext (sources/types.ts) gains optional `onRequest?: (record: RequestRecord) => void`. Every adapter calls it EXACTLY once per outbound request or fixture read: hackernews (label = the keyword), stackexchange (label = `${site}: ${keyword}`), snapshot (label 'fixture file', itemsReturned = items served). durationMs is measured with ctx.now() before and after the request (never negative); itemsReturned is the number of RAW items in the response before filtering; httpStatus is null for network errors and for the snapshot; quotaRemaining only where the API reports it (Stack Exchange), else null. A failed request has status 'failed' and a sanitized error. Adapters keep their existing return values and statuses; when `onRequest` is absent nothing changes.
+- New pure util utils/redact.ts: `sanitizeRequestError(message: string): string` removes every `key=...`, `api_key=...`, `token=...`, `access_token=...` and `Authorization: ...` fragment, strips query strings from any URL (keep scheme, host and path), redacts tokens that look like AIza..., gsk_... or long hex or base64 strings, collapses whitespace and truncates to 200 characters. All error texts stored in a RequestRecord pass through it.
+
+### 30.4 Storage and pipeline
+- RunStore (db/runs.ts) gains `saveSourceRequests(runId, records): Promise<void>` (one batch insert; no-op for an empty list) and `listSourceRequests(runId): Promise<SourceRequestView[]>` (ordered by id, at most 200). Update the supabase store, the replay store and every fake store in the tests.
+- runPipeline: pass `ctx = { ...deps.ctx, onRequest }` to runScout, where onRequest pushes into an array (keep at most 200 records). After runScout returns, call store.saveSourceRequests; if it throws, emit a scout warning `Could not save the request log` and continue (it never changes the run status). Existing events and tests are unchanged.
+
+### 30.5 API
+- `GET /runs/:runId/requests` (routes/runs.ts): same runId validation and error bodies as the other routes; 404 { error: 'Run not found' } when the run does not exist; 200 { requests: SourceRequestView[] }.
+- ReportView gains `summary.bySource: Record<string, number>` (signals per source among the scored signals of the run) and `sources: Array<{ source: SourceId; requestsOk: number; requestsFailed: number; itemsReturned: number; signalsKept: number; errors: string[] }>` built from the request log (errors = distinct sanitized messages, at most 5 per source). buildReport reads runStore.listSourceRequests. Update ReportView, the JSON endpoint and every test that builds a report.
+
+### 30.6 Demo recording and replay
+- demo/schema.ts: the recorded fixture gets an optional `requests` array (default [] when absent) of SourceRequestView-shaped objects, so the existing fixtures/demo-run.json stays valid. scripts/demo-record.ts reads listSourceRequests and stores them. demo/replay.ts serves them from listSourceRequests, revealing each request when the replay clock passes the Scout stage (simple rule: show all requests once any Scout event is visible).
+
+### 30.7 Web
+- lib/api.ts: getRequests(runId). hooks/useRunEvents.ts also fetches the request log on each poll tick (and once more at the final drain) and returns it.
+- New component SourceActivity (components/SourceActivity.tsx), shown on the Run page between the Pipeline card and the Result card, title "Source activity": one row per source with source label, "requests ok / failed", items returned, average duration in ms, latest quota remaining (when present) and signals kept (when the run is finished and the count is known from the request log; otherwise omit). Below it a native <details> "Request log" listing every request: source, label, status as TEXT (OK, Failed, Skipped), HTTP status, duration, items, and the sanitized error. Empty state: "No requests recorded for this run."
+- Inbox: a "Source" filter (All plus one option per source present, with counts) implemented as a pure function in lib/inbox.ts that composes with the existing filters.
+- ReportPage: new section "Data sources" after the summary: a table with the `sources` data (requests ok, failed, items returned, signals kept) and any errors listed under the table; the CSV is unchanged (it already has a source column).
+- Styles in tokens.css using the existing variables.
+
+### 30.8 Files
+supabase/migrations/0003_source_requests.sql, packages/shared types, utils/redact.ts, sources/*.ts (hackernews, stackexchange, snapshot, types), db/runs.ts, orchestrator/runPipeline.ts, routes/runs.ts, routes/report.ts, demo/schema.ts, demo/replay.ts, scripts/demo-record.ts, web lib/api.ts, hooks/useRunEvents.ts, lib/inbox.ts, components/SourceActivity.tsx, pages/RunPage.tsx, pages/InboxPage.tsx, pages/ReportPage.tsx, styles/tokens.css, plus tests. Do not edit fixtures/demo-run.json or fixtures/sample-signals.json.
+
 

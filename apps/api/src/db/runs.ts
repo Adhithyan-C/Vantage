@@ -3,10 +3,12 @@ import type {
   AgentId,
   EventKind,
   RawSignal,
+  RequestRecord,
   RunEvent,
   RunParams,
   RunStatus,
   RunView,
+  SourceRequestView,
   SellerProfileInput,
   SourceId,
   SourceStatus,
@@ -26,6 +28,8 @@ export interface RunStore {
   createRun(sellerProfileId: string, params: RunParams): Promise<string>;
   getRun(runId: string): Promise<RunView | null>;
   listEvents(runId: string, afterId: number): Promise<RunEvent[]>;
+  saveSourceRequests(runId: string, records: RequestRecord[]): Promise<void>;
+  listSourceRequests(runId: string): Promise<SourceRequestView[]>;
   setRunStatus(runId: string, status: RunStatus, finished: boolean): Promise<void>;
   upsertRunSource(runId: string, source: SourceId, patch: SourcePatch): Promise<void>;
   addEvent(
@@ -171,6 +175,49 @@ export function createRunStore(db: SupabaseClient): RunStore {
         kind: row.kind as EventKind,
         message: row.message as string,
         counts: (row.counts as Record<string, unknown> | null) ?? null,
+        createdAt: row.created_at as string,
+      }));
+    },
+
+    async saveSourceRequests(runId, records) {
+      if (records.length === 0) return;
+      const rows = records.map((record) => ({
+        run_id: runId,
+        source: record.source,
+        label: record.label,
+        status: record.status,
+        http_status: record.httpStatus,
+        duration_ms: record.durationMs,
+        items_returned: record.itemsReturned,
+        error: record.error,
+        quota_remaining: record.quotaRemaining,
+      }));
+      const { error } = await db.from('source_requests').insert(rows);
+      if (error) {
+        throw dbError('saveSourceRequests', error);
+      }
+    },
+
+    async listSourceRequests(runId) {
+      const { data, error } = await db
+        .from('source_requests')
+        .select('id,source,label,status,http_status,duration_ms,items_returned,error,quota_remaining,created_at')
+        .eq('run_id', runId)
+        .order('id', { ascending: true })
+        .limit(200);
+      if (error) {
+        throw dbError('listSourceRequests', error);
+      }
+      return (data ?? []).map((row) => ({
+        id: Number(row.id),
+        source: row.source as SourceId,
+        label: row.label as string,
+        status: row.status as RequestRecord['status'],
+        httpStatus: (row.http_status as number | null) ?? null,
+        durationMs: Number(row.duration_ms),
+        itemsReturned: Number(row.items_returned),
+        error: (row.error as string | null) ?? null,
+        quotaRemaining: (row.quota_remaining as number | null) ?? null,
         createdAt: row.created_at as string,
       }));
     },

@@ -31,6 +31,8 @@ class PipelineStore implements RunStore {
   async createRun(): Promise<string> { return 'unused'; }
   async getRun() { return null; }
   async listEvents() { return []; }
+  async saveSourceRequests() {}
+  async listSourceRequests() { return []; }
   async failStaleRuns() { return 0; }
   async setRunStatus(_runId: string, status: RunStatus): Promise<void> { this.statuses.push(status); }
   async upsertRunSource(_runId: string, _source: SourceId, _patch: SourcePatch): Promise<void> {}

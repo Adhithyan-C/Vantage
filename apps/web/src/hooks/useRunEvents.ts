@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { RunEvent, RunView } from '@vantage/shared';
-import { ApiError, getEvents, getRun } from '../lib/api';
+import type { RunEvent, RunView, SourceRequestView } from '@vantage/shared';
+import { ApiError, getEvents, getRequests, getRun } from '../lib/api';
 
 const POLL_MS = 1000;
 const RETRY_MS = 2000;
@@ -14,6 +14,7 @@ function messageOf(err: unknown): string {
 export interface RunEventsState {
   run: RunView | null;
   events: RunEvent[];
+  requests: SourceRequestView[];
   error: string | null;
   retry: () => void;
 }
@@ -21,6 +22,7 @@ export interface RunEventsState {
 export function useRunEvents(runId: string): RunEventsState {
   const [run, setRun] = useState<RunView | null>(null);
   const [events, setEvents] = useState<RunEvent[]>([]);
+  const [requests, setRequests] = useState<SourceRequestView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
 
@@ -37,6 +39,7 @@ export function useRunEvents(runId: string): RunEventsState {
 
     setRun(null);
     setEvents([]);
+    setRequests([]);
     setError(null);
 
     const wait = (ms: number): Promise<void> =>
@@ -61,6 +64,7 @@ export function useRunEvents(runId: string): RunEventsState {
       while (!cancelled) {
         try {
           appendEvents(await getEvents(runId, lastId));
+          setRequests(await getRequests(runId));
           if (cancelled) {
             return;
           }
@@ -79,6 +83,7 @@ export function useRunEvents(runId: string): RunEventsState {
               return;
             }
             appendEvents(await getEvents(runId, lastId));
+            setRequests(await getRequests(runId));
             return;
           }
           await wait(POLL_MS);
@@ -110,5 +115,5 @@ export function useRunEvents(runId: string): RunEventsState {
     };
   }, [runId, attempt]);
 
-  return { run, events, error, retry };
+  return { run, events, requests, error, retry };
 }

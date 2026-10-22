@@ -1,10 +1,11 @@
 import { describe, it, expect, vi } from 'vitest';
 import { hackerNewsAdapter } from '../src/sources/hackernews';
+import type { RequestRecord } from '@vantage/shared';
 import * as fs from 'fs';
 import * as path from 'path';
 
 describe('Hacker News adapter', () => {
-  const getCtx = (fetchFn: any) => ({
+  const getCtx = (fetchFn: typeof fetch) => ({
     fetch: fetchFn,
     now: () => new Date('2026-10-01T00:00:00Z'),
     userAgent: 'test/1.0',
@@ -92,5 +93,25 @@ describe('Hacker News adapter', () => {
     const result = await hackerNewsAdapter.search({ keywords: [], sinceDays: 30, maxResults: 10 }, getCtx(fetchFn));
     expect(result.status).toBe('skipped');
     expect(result.signals.length).toBe(0);
+  });
+
+  it('records one request with its keyword, raw item count, status and duration', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => new Response(JSON.stringify({ hits: [{ objectID: 'r', author: 'u', title: 'Valid title', created_at: '2026-10-01T00:00:00Z' }] }), { status: 200 });
+    await hackerNewsAdapter.search({ keywords: ['billing'], sinceDays: 30, maxResults: 10 }, {
+      ...getCtx(fetchFn), onRequest: (record) => records.push(record),
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ source: 'hackernews', label: 'billing', status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: null });
+    expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
+  });
+
+  it('records sanitized request errors for failed responses', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => new Response('error', { status: 403 });
+    await hackerNewsAdapter.search({ keywords: ['billing'], sinceDays: 30, maxResults: 10 }, {
+      ...getCtx(fetchFn), onRequest: (record) => records.push(record),
+    });
+    expect(records[0]).toMatchObject({ status: 'failed', httpStatus: 403, error: 'HN request failed with status 403' });
   });
 });

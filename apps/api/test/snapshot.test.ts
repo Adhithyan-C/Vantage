@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { RawSignalSchema, SampleDatasetSchema } from '@vantage/shared';
 import type { AdapterContext, SourceQuery } from '../src/sources/types';
+import type { RequestRecord } from '@vantage/shared';
 import { getEnabledAdapters } from '../src/sources/index';
 import { createSnapshotAdapter } from '../src/sources/snapshot';
 import { SOURCE_CONFIG } from '../src/config/sources';
@@ -51,6 +52,15 @@ describe('snapshot adapter', () => {
     const differentSearch = await adapter.search({ ...query, keywords: ['unrelated'], sinceDays: 1 }, context);
     expect(limited.signals).toHaveLength(4);
     expect(differentSearch.signals).toEqual((await adapter.search(query, context)).signals);
+  });
+
+  it('records a fixture read with served item count and no HTTP status', async () => {
+    const records: RequestRecord[] = [];
+    const adapter = createSnapshotAdapter({ readFile: () => fixtureText, path: fixturePath });
+    await adapter.search({ ...query, maxResults: 4 }, { ...context, onRequest: (record) => records.push(record) });
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ source: 'snapshot', label: 'fixture file', status: 'ok', httpStatus: null, itemsReturned: 4, quotaRemaining: null });
+    expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 
   it.each([

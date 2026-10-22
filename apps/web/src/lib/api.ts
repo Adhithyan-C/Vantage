@@ -1,4 +1,4 @@
-import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView } from '@vantage/shared';
+import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView } from '@vantage/shared';
 
 const BASE = '/api';
 
@@ -79,6 +79,11 @@ export async function getEvents(runId: string, after: number): Promise<RunEvent[
     `/runs/${encodeURIComponent(runId)}/events?after=${after}`,
   );
   return body.events;
+}
+
+export async function getRequests(runId: string): Promise<SourceRequestView[]> {
+  const body = await request<{ requests: SourceRequestView[] }>(`/runs/${encodeURIComponent(runId)}/requests`);
+  return body.requests;
 }
 
 export async function getLeads(runId: string): Promise<LeadView[]> {

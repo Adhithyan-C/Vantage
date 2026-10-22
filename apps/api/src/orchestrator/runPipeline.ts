@@ -1,4 +1,4 @@
-import type { RunParams, RunStatus, SourceStatus } from '@vantage/shared';
+import type { RequestRecord, RunParams, RunStatus, SourceStatus } from '@vantage/shared';
 import type { RunStore } from '../db/runs';
 import type { SourceAdapter, AdapterContext } from '../sources/types';
 import { runScout } from '../agents/scout';
@@ -86,6 +86,8 @@ export async function runPipeline(
       return;
     }
 
+    const requestRecords: RequestRecord[] = [];
+
     for (const adapter of adapters) {
       await store.upsertRunSource(runId, adapter.id, {
         status: 'running',
@@ -96,6 +98,12 @@ export async function runPipeline(
     const ids = adapters.map((adapter) => adapter.id).join(', ');
     await emit.progress('scout', `Searching ${ids} for ${params.keywords.length} keyword(s)`);
 
+    const scoutCtx: AdapterContext = {
+      ...ctx,
+      onRequest: (record) => {
+        if (requestRecords.length < 200) requestRecords.push(record);
+      },
+    };
     const result = await runScout({
       adapters,
       query: {
@@ -103,8 +111,14 @@ export async function runPipeline(
         sinceDays: params.sinceDays,
         maxResults: params.maxResults,
       },
-      ctx,
+      ctx: scoutCtx,
     });
+
+    try {
+      await store.saveSourceRequests(runId, requestRecords);
+    } catch {
+      await emit.warning('scout', 'Could not save the request log');
+    }
 
     for (const report of result.sources) {
       await store.upsertRunSource(runId, report.source, {

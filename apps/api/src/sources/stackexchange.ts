@@ -3,6 +3,7 @@ import type { RawSignal } from '@vantage/shared';
 import type { AdapterContext, AdapterResult, SourceAdapter, SourceQuery } from './types.js';
 import { htmlToText } from '../utils/text.js';
 import { fetchWithRetry } from '../utils/rateLimit.js';
+import { sanitizeRequestError } from '../utils/redact.js';
 
 const STACK_EXCHANGE_ENDPOINT = 'https://api.stackexchange.com/2.3/search/advanced';
 const DEFAULT_SITE = 'softwarerecs';
@@ -124,9 +125,12 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
         const { site, keyword } = request;
         if (signals.length >= query.maxResults || stopError) break;
         attempted++;
+        const startedAt = ctx.now().getTime();
         let response: Response | null = null;
         let body: unknown = null;
         let requestFailed = false;
+        let requestError: string | null = null;
+        let itemsReturned = 0;
 
         try {
           const url = new URL(STACK_EXCHANGE_ENDPOINT);
@@ -146,17 +150,22 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
             maxRetries: 0,
           });
           body = await response.json();
-        } catch {
+        } catch (err: unknown) {
           requestFailed = true;
-          firstError ??= 'Stack Exchange request failed';
+          requestError = response
+            ? sanitizeRequestError(failureMessage(response, body))
+            : sanitizeRequestError(err instanceof Error ? err.message : String(err));
+          firstError ??= requestError || 'Stack Exchange request failed';
         }
 
         const quotaRemaining = quotaFrom(body);
         const backoff = backoffFrom(body);
+        if (isRecord(body) && Array.isArray(body.items)) itemsReturned = body.items.length;
         if (!requestFailed && response && response.ok) {
           if (!isRecord(body) || !Array.isArray(body.items) || typeof body.error_id === 'number') {
             requestFailed = true;
-            firstError ??= failureMessage(response, body);
+            requestError = sanitizeRequestError(failureMessage(response, body));
+            firstError ??= requestError;
           } else {
             for (const item of body.items) {
               if (signals.length >= query.maxResults) break;
@@ -168,10 +177,26 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
           }
         } else if (!requestFailed) {
           requestFailed = true;
-          firstError ??= failureMessage(response, body);
+          requestError = sanitizeRequestError(failureMessage(response, body));
+          firstError ??= requestError;
         }
 
         if (requestFailed) failedRequests++;
+
+        try {
+          ctx.onRequest?.({
+            source: 'stackexchange',
+            label: `${site}: ${keyword}`,
+            status: requestFailed ? 'failed' : 'ok',
+            httpStatus: response?.status ?? null,
+            durationMs: Math.max(0, ctx.now().getTime() - startedAt),
+            itemsReturned,
+            error: requestError,
+            quotaRemaining,
+          });
+        } catch {
+          // Request logging must not change adapter behavior.
+        }
 
         if (backoff !== null) {
           if (backoff > 60) {

@@ -49,8 +49,10 @@ function report(signals: LeadView[] = [ranked, other], sampleData = false): Repo
         venting: signals.filter((signal) => signal.label === 'venting').length,
         noise: signals.filter((signal) => signal.label === 'noise').length,
       },
+      bySource: Object.fromEntries([...new Set(signals.map((signal) => signal.source))].map((source) => [source, signals.filter((item) => item.source === source).length])),
       sampleData,
     },
+    sources: [],
     method: { weights: { intent: 0.4, fit: 0.25, recency: 0.2, engagement: 0.15 }, recencyHalfLifeDays: 30, promptVersion: 'classifier.v2' },
     signals,
   };
@@ -85,6 +87,16 @@ describe('report page rendering', () => {
     const html = renderToString(<ReportContent report={report([other])} />);
     expect(html).toContain('No buying signals in this run');
     expect(html).toContain('classified as venting or noise');
+  });
+
+  it('renders failed source counts and sanitized errors in Data sources', () => {
+    const model = report([ranked]);
+    model.sources = [{ source: 'hackernews', requestsOk: 1, requestsFailed: 1, itemsReturned: 4, signalsKept: 2, errors: ['Request failed'] }];
+    const html = renderToString(<ReportContent report={model} />);
+    expect(html).toContain('Data sources');
+    expect(html).toContain('Requests failed');
+    expect(html).toContain('Request failed');
+    expect(html.toLowerCase()).not.toContain('lead');
   });
 
   it('shows download and print controls and uses no contact-oriented wording', () => {

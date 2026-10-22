@@ -65,6 +65,8 @@ describe('Phase 6 pure web functions', () => {
     expect(filterSignals(signals, { ...defaults, showOtherSignals: true, label: 'venting' }).map((item) => item.label)).toEqual(['venting']);
     expect(filterSignals(signals, { ...defaults, showOtherSignals: true, status: 'accepted' }).map((item) => item.label)).toEqual(['buyer_intent']);
     expect(filterSignals(signals, { ...defaults, showOtherSignals: true, minScore: 70 }).map((item) => item.label)).toEqual(['buyer_intent', 'venting', 'noise']);
+    const sourced = signals.map((item) => item.label === 'venting' ? { ...item, source: 'stackexchange' as const } : item);
+    expect(filterSignals(sourced, { ...defaults, showOtherSignals: true, label: 'venting', status: 'rejected' }, 'stackexchange').map((item) => item.label)).toEqual(['venting']);
   });
 
   it('segments text with absent, single, adjacent, overlapping, invalid, start, and end spans', () => {

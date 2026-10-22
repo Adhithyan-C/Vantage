@@ -702,6 +702,28 @@ td {
   font-weight: 500;
 }
 
+.source-activity details {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.source-activity summary {
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.request-log {
+  max-height: 360px;
+  overflow-y: auto;
+  padding-left: 20px;
+}
+
+.request-log li {
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
 @media print {
   body,
   #root,

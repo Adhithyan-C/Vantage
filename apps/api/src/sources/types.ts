@@ -1,4 +1,4 @@
-import type { RawSignal, SourceId } from '@vantage/shared';
+import type { RawSignal, RequestRecord, SourceId } from '@vantage/shared';
 
 export interface SourceQuery {
   keywords: string[];
@@ -12,6 +12,7 @@ export interface AdapterContext {
   userAgent: string;
   timeoutMs: number;
   maxRetries: number;
+  onRequest?: (record: RequestRecord) => void;
 }
 
 export interface AdapterResult {

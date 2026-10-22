@@ -5,6 +5,7 @@ import type { SourceAdapter, AdapterContext, AdapterResult } from '../src/source
 import type { RunStore, SourcePatch } from '../src/db/runs';
 import type {
   RawSignal,
+  RequestRecord,
   RunParams,
   RunStatus,
   SourceStatus,
@@ -30,6 +31,8 @@ class FakeStore implements RunStore {
   storeSignalsCalls: Array<{ runId: string; signals: RawSignal[] }> = [];
   storeSignalsResult: { inserted: number; updated: number } = { inserted: 0, updated: 0 };
   storeSignalsError: Error | null = null;
+  requestRecords: RequestRecord[] = [];
+  saveSourceRequestsError: Error | null = null;
   addEventError: Error | null = null;
 
   async createSellerProfile(_input: SellerProfileInput): Promise<string> {
@@ -47,6 +50,13 @@ class FakeStore implements RunStore {
   async listEvents(_runId: string, _afterId: number): Promise<RunEvent[]> {
     throw new Error('not used');
   }
+
+  async saveSourceRequests(_runId: string, records: RequestRecord[]): Promise<void> {
+    this.requestRecords = records;
+    if (this.saveSourceRequestsError) throw this.saveSourceRequestsError;
+  }
+
+  async listSourceRequests() { return []; }
 
   async failStaleRuns(): Promise<number> {
     throw new Error('not used');
@@ -290,6 +300,43 @@ describe('runPipeline', () => {
 
     expect(store.statusCalls.at(-1)?.status).toBe('completed');
     consoleSpy.mockRestore();
+  });
+
+  it('saves request records collected by the adapter context once', async () => {
+    const store = new FakeStore();
+    const adapter: SourceAdapter = {
+      id: 'hackernews',
+      async search(_query, context) {
+        context.onRequest?.({ source: 'hackernews', label: 'support', status: 'ok', httpStatus: 200, durationMs: 1, itemsReturned: 3, error: null, quotaRemaining: null });
+        return { signals: [], status: 'ok' };
+      },
+    };
+    await run(store, [adapter]);
+    expect(store.requestRecords).toHaveLength(1);
+    expect(store.requestRecords[0]?.label).toBe('support');
+  });
+
+  it('warns when request log storage fails without changing run status', async () => {
+    const store = new FakeStore();
+    store.saveSourceRequestsError = new Error('request log unavailable');
+    await run(store, [fakeAdapter('hackernews', { signals: [], status: 'ok' })]);
+    expect(store.statusCalls.at(-1)?.status).toBe('completed');
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'scout', kind: 'warning', message: 'Could not save the request log' }));
+  });
+
+  it('keeps at most 200 request records', async () => {
+    const store = new FakeStore();
+    const adapter: SourceAdapter = {
+      id: 'hackernews',
+      async search(_query, context) {
+        for (let index = 0; index < 205; index++) {
+          context.onRequest?.({ source: 'hackernews', label: String(index), status: 'ok', httpStatus: 200, durationMs: 0, itemsReturned: 0, error: null, quotaRemaining: null });
+        }
+        return { signals: [], status: 'ok' };
+      },
+    };
+    await run(store, [adapter]);
+    expect(store.requestRecords).toHaveLength(200);
   });
 
   it('computeRunStatus maps source statuses to a run status', () => {

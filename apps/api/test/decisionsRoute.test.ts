@@ -29,6 +29,8 @@ const runStore: RunStore = {
   async createRun(_sellerProfileId: string, _params: RunParams): Promise<string> { return runId; },
   async getRun(_id: string): Promise<RunView | null> { return null; },
   async listEvents(_id: string, _afterId: number): Promise<RunEvent[]> { return []; },
+  async saveSourceRequests() {},
+  async listSourceRequests() { return []; },
   async setRunStatus(_id: string, _status: RunStatus, _finished: boolean): Promise<void> {},
   async upsertRunSource(_id: string, _source: SourceId, _patch: SourcePatch): Promise<void> {},
   async addEvent(_id: string): Promise<void> {},

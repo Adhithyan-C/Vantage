@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { PipelineProgress, RunStatusBadge } from '../components/PipelineProgress';
+import { SourceActivity } from '../components/SourceActivity';
 import { useRunEvents } from '../hooks/useRunEvents';
 import { EVENT_KIND_LABEL, formatClock, formatDuration, shortId } from '../lib/format';
 
 export function RunPage({ runId }: { runId: string }) {
-  const { run, events, error, retry } = useRunEvents(runId);
+  const { run, events, requests, error, retry } = useRunEvents(runId);
   const [now, setNow] = useState<number>(() => Date.now());
   const running = run?.status === 'running';
 
@@ -59,6 +60,7 @@ export function RunPage({ runId }: { runId: string }) {
       {error && <ErrorState title="Connection problem" message={error} onRetry={retry} />}
 
       <PipelineProgress run={run} events={events} />
+      <SourceActivity requests={requests} run={run} />
 
       {run.status !== 'running' && (
         <section className="card" aria-labelledby="result-title">
