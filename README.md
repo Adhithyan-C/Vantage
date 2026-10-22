@@ -10,9 +10,11 @@ Vantage produces public-post signals, not contact records. It does not provide c
 flowchart LR
   subgraph live[Live and sample sources]
     HN[Hacker News via Algolia]
+    SE[Stack Exchange API v2.3]
     Sample[Synthetic sample dataset]
   end
   HN --> Scout[Scout: fetch, normalize, deduplicate]
+  SE --> Scout
   Sample --> Scout
   Scout --> Classifier[Classifier: label and propose quotes]
   Classifier <--> LLM[Configured LLM provider]
@@ -30,6 +32,7 @@ flowchart LR
 ## Features available now
 
 - Search Hacker News through the free Algolia API. The footer attributes the search to Algolia.
+- Search Stack Exchange Software Recommendations questions through the official API; each result links to its original question and shows its author.
 - Run the synthetic sample dataset for repeatable demonstrations and evaluation. The sample posts are labelled as sample data, have no real-post link, and ignore the search keywords.
 - Classify posts as buyer intent, competitor complaint, venting, or noise; verify proposed evidence quotes against stored post text and discard quotes that do not match.
 - Enrich signals and rank buyer-intent signals before competitor complaints. The Scorer is code; it computes scores from the configured weights, half-life, and engagement cap.
@@ -65,7 +68,8 @@ Names and requiredness below come from `apps/api/src/config/env.ts`; purposes ar
 | `REDDIT_USER_AGENT` | Yes | Required by current environment validation; Reddit access is not implemented. |
 | `REDDIT_CLIENT_ID` | No | Reserved optional Reddit API credential; adapter not implemented. |
 | `REDDIT_CLIENT_SECRET` | No | Reserved optional Reddit API credential; adapter not implemented. |
-| `STACKEXCHANGE_KEY` | No | Optional setting accepted for a future source; adapter not implemented. |
+| `STACKEXCHANGE_KEY` | No | Optional Stack Exchange application key; without one, the API has a lower daily quota. |
+| `STACKEXCHANGE_SITES` | No | Optional comma-separated Stack Exchange site IDs; defaults to `softwarerecs` and uses at most three valid IDs. |
 | `GITHUB_TOKEN` | No | Optional setting accepted for a future source; adapter not implemented. |
 | `DEMO_MODE` | No | Selects recorded replay mode when set to `true`; defaults to live mode. |
 | `PORT` | No | API listening port; defaults to 3001. |
@@ -97,6 +101,6 @@ fixtures/   seller, synthetic posts, and recorded demo run
 docs/       demo script, evaluation, limitations and ethics
 ```
 
-Implemented phases reflected in the current architecture amendments: 1, 2A, 3A, 3B, 4, 4.1, 5, 6, 6.1, 7A, 8A, and 8B. Reddit, developer-forum and review-site adapters, Displacement and themes, the approach suggester, Monitor, authentication, broader row-level-security policies, deployment, accessibility audit, and load testing are not implemented. See [ARCHITECTURE.md](ARCHITECTURE.md) for design and phase details.
+Implemented phases reflected in the current architecture amendments: 1, 2A, 3A, 3B, 4, 4.1, 5, 6, 6.1, 7A, 7B, 8A, and 8B. Reddit, developer-forum and review-site adapters, Displacement and themes, the approach suggester, Monitor, authentication, broader row-level-security policies, deployment, accessibility audit, and load testing are not implemented. See [ARCHITECTURE.md](ARCHITECTURE.md) for design and phase details.
 
 More documentation: [presentation script](docs/DEMO_SCRIPT.md), [evaluation](docs/EVALUATION.md), and [limitations and ethics](docs/LIMITATIONS_AND_ETHICS.md).

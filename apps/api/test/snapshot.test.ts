@@ -5,6 +5,7 @@ import { RawSignalSchema, SampleDatasetSchema } from '@vantage/shared';
 import type { AdapterContext, SourceQuery } from '../src/sources/types';
 import { getEnabledAdapters } from '../src/sources/index';
 import { createSnapshotAdapter } from '../src/sources/snapshot';
+import { SOURCE_CONFIG } from '../src/config/sources';
 
 const fixturePath = fileURLToPath(new URL('../../../fixtures/sample-signals.json', import.meta.url));
 const fixtureText = readFileSync(fixturePath, 'utf8');
@@ -22,6 +23,11 @@ const query: SourceQuery = { keywords: ['helpdesk'], sinceDays: 30, maxResults: 
 describe('snapshot adapter', () => {
   it('registers snapshot as an enabled source', () => {
     expect(getEnabledAdapters().map((adapter) => adapter.id)).toContain('snapshot');
+  });
+
+  it('registers Stack Exchange as an enabled source', () => {
+    expect(getEnabledAdapters().map((adapter) => adapter.id)).toContain('stackexchange');
+    expect(SOURCE_CONFIG.enabled.stackexchange).toBe(true);
   });
 
   it('maps all 36 synthetic items to valid RawSignals with deterministic dates', async () => {

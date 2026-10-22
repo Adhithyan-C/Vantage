@@ -1184,4 +1184,44 @@ apps/api/src/scripts/demo-record.ts with npm scripts "demo:record" in apps/api/p
 ### 28.7 Files
 apps/api/src/demo/schema.ts, demo/replay.ts, scripts/demo-record.ts, orchestrator/runPipeline.ts (PipelineDeps), routes/runs.ts, index.ts, apps/api/package.json and root package.json (script entries only), web lib/api.ts, components/DemoBanner.tsx, app/App.tsx, pages/ReportPage.tsx, styles/tokens.css, plus tests. Do not create or edit fixtures/demo-run.json (the human records it).
 
+---
+
+## 29. Phase 7B: Stack Exchange source (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 29.1 Scope and decisions
+New live source id 'stackexchange', label "Stack Exchange", using the official Stack Exchange API v2.3 (host api.stackexchange.com). No scraping, no new packages, no migration (signals.source is free text). Each question (title plus body) becomes one RawSignal. Answers and comments are out of scope. Default site: softwarerecs (Software Recommendations).
+
+### 29.2 Verify before coding
+Check the OFFICIAL documentation (api.stackexchange.com/docs) for: the /search/advanced endpoint and its parameters (q, site, sort, order, fromdate, pagesize, page, filter, key), the built-in "withbody" filter, the response fields you use (items[].question_id, title, body, link, creation_date, score, answer_count, owner.display_name, plus quota_remaining, quota_max, has_more, backoff, and the error fields error_id, error_name, error_message), gzip responses, and the key and quota rules. If any assumption below differs from the documentation, STOP and report the difference before coding.
+
+### 29.3 Adapter (apps/api/src/sources/stackexchange.ts)
+`createStackExchangeAdapter({ key?, sites?, sleep? })` returns a SourceAdapter with id 'stackexchange'. Defaults: key from env STACKEXCHANGE_KEY (optional), sites from env STACKEXCHANGE_SITES (optional comma list; each must match /^[a-z0-9.]+$/; invalid entries are dropped; empty gives ['softwarerecs']; at most 3 sites), sleep = setTimeout promise (injectable for tests).
+- search(query, ctx): if no keywords return { signals: [], status: 'skipped', error: 'No keywords provided' }. For each site, then each keyword (in order), make ONE request with fetchWithRetry (headers: User-Agent from ctx, Accept application/json) to /2.3/search/advanced with q=<keyword>, site=<site>, sort=relevance, order=desc, fromdate=<unix seconds of now minus sinceDays>, pagesize=min(maxResults, 100), page=1, filter=withbody, and key=<key> only when configured. (The Stack Exchange app key is a public application identifier that the API requires as a query parameter; this is the one allowed exception to "keys never go in URLs". Never log the URL with the key.)
+- Mapping (pure exported function mapQuestion(item, site)): skip items without question_id, link or a non-empty owner.display_name; authorHandle = htmlToText(owner.display_name); community = site; url = item.link; text = htmlToText(title) + two newlines + htmlToText(body) (title only when the body is empty); createdAt = ISO string of creation_date * 1000; engagement { score: item.score, comments: item.answer_count }; externalId = `${site}:${question_id}`; skip texts shorter than 20 characters; validate every signal with RawSignalSchema.safeParse and drop failures.
+- Dedupe by externalId across keywords and sites; stop when query.maxResults signals are collected.
+- Quota and backoff: after every response read `backoff` (seconds): if present wait exactly that many seconds with the injected sleep before the next request. If backoff is larger than 60 seconds, do not wait; stop sending requests for this run, keep what you have, and set status 'degraded' with error `Stack Exchange asked for a ${backoff}s backoff; stopped early`. If quota_remaining is below 10 stop sending requests, keep what you have, and set status 'degraded' with error `Stack Exchange quota nearly used (${quota_remaining} left)`.
+Backoff clarification: wait the full interval up to 60 seconds; for larger intervals, stop requests for this run and return degraded.
+- Errors: a non-2xx response, a JSON body with error_id, or a body that is not an object with an items array counts as a failed request (first message kept, never including the key). Status rules as in the Hacker News adapter: no failed requests gives 'ok', some failed gives 'degraded', all failed gives 'failed'. Never throw out of search().
+- Register it in sources/index.ts (ADAPTERS and the enabled config: SOURCE_CONFIG.enabled.stackexchange = true). Runs without `params.sources` keep their current behaviour of using every registered adapter except 'snapshot'; so, with this change, the default includes Stack Exchange.
+
+### 29.4 Shared and config
+- packages/shared constants: add 'stackexchange' to SOURCE_IDS (at the end). Update everything that is typed on SourceId (labels, records) so the typecheck passes.
+- config/env.ts: add optional STACKEXCHANGE_SITES (empty string means unset). .env.example gets `STACKEXCHANGE_SITES=` after the STACKEXCHANGE_KEY line.
+
+### 29.5 Dev CLI
+apps/api/src/scripts/scout-cli.ts gains an option `--sources <comma list of source ids>` (validated against the registered adapters; unknown id prints an error and exits 1). Without it, behaviour is unchanged.
+
+### 29.6 Web
+- lib/format.ts: SOURCE_LABEL.stackexchange = 'Stack Exchange'.
+- SetupPage Sources panel: add a checkbox "Stack Exchange (Software Recommendations)" checked by default, hint "Questions where people ask for software recommendations." The request's params.sources lists the checked ids (HN and Stack Exchange both default to checked).
+- Footer: add one line, shown on every page: "Stack Exchange posts are shared under CC BY-SA; each signal links to its source." Before using this wording verify the license terms on Stack Exchange's own site (the licence and attribution requirements) and adjust the sentence to be accurate.
+- Signals from 'stackexchange' show "Open original post" like Hacker News ones (real link, no sample badge).
+
+### 29.7 Files
+sources/stackexchange.ts, sources/index.ts, config/sources.ts, config/env.ts, scripts/scout-cli.ts, .env.example, packages/shared constants and anything the typecheck requires, web lib/format.ts, SetupPage.tsx, App.tsx (footer), README.md and docs/LIMITATIONS_AND_ETHICS.md (documentation updates, Step 6), plus tests.
+
+---
+
 

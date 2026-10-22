@@ -41,12 +41,19 @@ export function App() {
         )}
       </main>
 
-      <footer className="app-footer">
-        <p>Vantage finds public signals. It does not provide contact details or send messages.</p>
-        <p>
-          Hacker News data: <a href="https://hn.algolia.com">Search by Algolia</a>
-        </p>
-      </footer>
+      <AppFooter />
     </div>
+  );
+}
+
+export function AppFooter() {
+  return (
+    <footer className="app-footer">
+      <p>Vantage finds public signals. It does not provide contact details or send messages.</p>
+      <p>
+        Hacker News data: <a href="https://hn.algolia.com">Search by Algolia</a>
+      </p>
+      <p>Stack Exchange user contributions are licensed under applicable CC BY-SA terms; each signal links to its source and shows its author.</p>
+    </footer>
   );
 }

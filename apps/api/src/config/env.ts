@@ -13,6 +13,7 @@ const EnvSchema = z.object({
   GROQ_MODEL: z.string().min(1).optional(),
   LLM_PROVIDER_ORDER: z.string().min(1).optional(),
   STACKEXCHANGE_KEY: z.string().min(1).optional(),
+  STACKEXCHANGE_SITES: z.string().optional(),
   GITHUB_TOKEN: z.string().min(1).optional(),
   DEMO_MODE: z.enum(['true', 'false']).default('false').transform((val) => val === 'true'),
   PORT: z.string().optional().default('3001').transform(Number).pipe(z.number().int().min(1).max(65535))

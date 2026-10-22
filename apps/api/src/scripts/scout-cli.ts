@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util';
 import { fileURLToPath } from 'node:url';
+import type { SourceId } from '@vantage/shared';
 import { runScout } from '../agents/scout.js';
-import { getEnabledAdapters } from '../sources/index.js';
+import { ADAPTERS, getEnabledAdapters } from '../sources/index.js';
 import { SOURCE_CONFIG } from '../config/sources.js';
+import { parseSourceSelection } from './sourceSelection.js';
 
 const { values } = parseArgs({
   options: {
@@ -10,6 +12,7 @@ const { values } = parseArgs({
     'since-days': { type: 'string', default: '30' },
     max: { type: 'string', default: '50' },
     'dry-run': { type: 'boolean', default: false },
+    sources: { type: 'string' },
   },
 });
 
@@ -17,6 +20,15 @@ const keywordsRaw = values['keywords'] as string;
 const sinceDaysRaw = values['since-days'] as string;
 const maxRaw = values['max'] as string;
 const dryRun = values['dry-run'] as boolean;
+const sourceSelection = parseSourceSelection(
+  values.sources,
+  Object.keys(ADAPTERS) as Array<keyof typeof ADAPTERS & SourceId>,
+);
+
+if (sourceSelection.error) {
+  console.error(`Error: ${sourceSelection.error}`);
+  process.exit(1);
+}
 
 // Validate since-days and max
 const sinceDays = parseInt(sinceDaysRaw, 10);
@@ -51,7 +63,9 @@ const ctx = {
 };
 
 // Run scout
-const adapters = getEnabledAdapters();
+const adapters = getEnabledAdapters().filter(
+  (adapter) => sourceSelection.sourceIds === null || sourceSelection.sourceIds.includes(adapter.id),
+);
 const result = await runScout({
   adapters,
   query: { keywords, sinceDays, maxResults },
@@ -97,8 +111,8 @@ if (dryRun) {
   let env;
   try {
     env = getEnv();
-  } catch (err: any) {
-    console.error(err.message);
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 

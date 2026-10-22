@@ -7,6 +7,7 @@ import { CriteriaChecklist } from './CriteriaChecklist';
 import { DiscardedQuotesNote } from '../pages/SignalDetailPage';
 import { EMPTY_FORM, buildRequest, SetupPage } from '../pages/SetupPage';
 import { SOURCE_LABEL } from '../lib/format';
+import { AppFooter } from '../app/App';
 
 const ranked: LeadView = {
   leadId: 'id', signalId: 'signal', rank: 1, label: 'buyer_intent', score: 63,
@@ -60,6 +61,7 @@ describe('Phase 6 server-rendered components', () => {
   it('labels snapshot cards as sample data and removes their original-post link', () => {
     const sample = renderToString(<SignalCard signal={{ ...ranked, source: 'snapshot' }} runId="run" />);
     const live = renderToString(<SignalCard signal={ranked} runId="run" />);
+    const stackExchange = renderToString(<SignalCard signal={{ ...ranked, source: 'stackexchange' }} runId="run" />);
     expect(sample).toContain('Sample data');
     expect(sample).toContain('Sample dataset (synthetic)');
     expect(sample).toContain('Sample post (not a real link)');
@@ -67,19 +69,35 @@ describe('Phase 6 server-rendered components', () => {
     expect(sample).not.toContain('href="https://example.test"');
     expect(live).not.toContain('Sample data');
     expect(live).toContain('Open original post');
+    expect(stackExchange).toContain('Open original post');
+    expect(stackExchange).toContain('href="https://example.test"');
+    expect(stackExchange).not.toContain('Sample data');
   });
 
   it('includes the selected sources in setup requests and blocks an empty selection', () => {
-    const request = buildRequest(EMPTY_FORM, ['hackernews', 'snapshot']);
-    expect(request).toMatchObject({ params: { sources: ['hackernews', 'snapshot'] } });
+    const request = buildRequest(EMPTY_FORM, ['hackernews', 'snapshot', 'stackexchange']);
+    expect(request).toMatchObject({ params: { sources: ['hackernews', 'snapshot', 'stackexchange'] } });
+    expect(buildRequest(EMPTY_FORM, ['hackernews'])).toMatchObject({
+      params: { sources: ['hackernews'] },
+    });
     expect(buildRequest(EMPTY_FORM, [])).toBeNull();
     const setup = renderToString(<SetupPage />);
     expect(setup).toContain('Labelled test posts written for Vantage. They are not real posts and ignore your keywords.');
     expect(setup).toContain('Sample dataset (synthetic)');
+    expect(setup).toContain('Stack Exchange (Software Recommendations)');
+    expect(setup).toContain('aria-describedby="source-stackexchange-hint" checked=""');
+    expect(setup).toContain('Questions where people ask for software recommendations.');
   });
 
   it('uses the explicit synthetic source label', () => {
     expect(SOURCE_LABEL.snapshot).toBe('Sample dataset (synthetic)');
+    expect(SOURCE_LABEL.stackexchange).toBe('Stack Exchange');
+  });
+
+  it('shows Stack Exchange attribution in the shared footer', () => {
+    const footer = renderToString(<AppFooter />);
+    expect(footer).toContain('licensed under applicable CC BY-SA terms');
+    expect(footer).toContain('each signal links to its source and shows its author');
   });
 
   it('renders score rows and total only for ranked signals', () => {

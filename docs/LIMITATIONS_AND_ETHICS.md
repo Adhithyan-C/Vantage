@@ -4,7 +4,7 @@
 
 Vantage is designed around public posts and stores the minimum fields used by its pipeline: public handle, community, text snapshot, URL, timestamps, and engagement. It does not collect contact details, send messages, or scrape login-gated or bot-protected pages. Source use must follow applicable platform terms; a platform-terms compliance audit has not been performed (not verified).
 
-Hacker News search uses the free Algolia API and the app footer displays “Search by Algolia.” Reddit's unauthenticated `.json` endpoints stopped working in May 2026; there is no Reddit adapter, and access requires official API credentials. Developer-forum and review-site sources are not built.
+Hacker News search uses the free Algolia API and the app footer displays “Search by Algolia.” Stack Exchange search uses the official API and currently collects questions only, not answers or comments. Public user contributions use applicable CC BY-SA terms, which vary by contribution date; the UI shows the author and links each signal to its original post for attribution. The unauthenticated daily API quota is 300 requests, and a free application key increases the default quota to 10,000 requests per day. Actual Stack Exchange result volume for a given seller is unverified until checked in a live run. Reddit's unauthenticated `.json` endpoints stopped working in May 2026; there is no Reddit adapter, and access requires official API credentials. Developer-forum and review-site sources are not built.
 
 The backend uses a Supabase service-role key. The current database policy configuration includes one anonymous read policy on `run_events`; broader authentication and row-level-security policies are not implemented.
 

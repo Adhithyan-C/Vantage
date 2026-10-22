@@ -5,6 +5,7 @@ export const SOURCE_LABEL: Record<SourceId, string> = {
   hackernews: 'Hacker News',
   devforums: 'Developer forums',
   snapshot: 'Sample dataset (synthetic)',
+  stackexchange: 'Stack Exchange',
 };
 
 export const EVENT_KIND_LABEL: Record<EventKind, string> = {

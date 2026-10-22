@@ -148,6 +148,17 @@ describe('runPipeline', () => {
     expect(new Set(store.sourceCalls.map((call) => call.source))).toEqual(new Set(['hackernews']));
   });
 
+  it('includes Stack Exchange by default while still excluding the snapshot adapter', async () => {
+    const store = new FakeStore();
+    const searched: SourceId[] = [];
+    await run(store, [
+      recordingAdapter('hackernews', searched),
+      recordingAdapter('snapshot', searched),
+      recordingAdapter('stackexchange', searched),
+    ]);
+    expect(searched).toEqual(['hackernews', 'stackexchange']);
+  });
+
   it.each([
     [['snapshot'], ['snapshot']],
     [['hackernews', 'snapshot'], ['hackernews', 'snapshot']],

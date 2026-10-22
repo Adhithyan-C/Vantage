@@ -49,6 +49,16 @@ describe('loadEnv', () => {
     expect(env.GROQ_API_KEY).toBeUndefined();
   });
 
+  it('treats an empty STACKEXCHANGE_SITES value as unset', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      STACKEXCHANGE_SITES: '',
+    });
+    expect(env.STACKEXCHANGE_SITES).toBeUndefined();
+  });
+
   it('DEMO_MODE \'true\': returns DEMO_MODE true', () => {
     const env = loadEnv({
       SUPABASE_URL: 'x',

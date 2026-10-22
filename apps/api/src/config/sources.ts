@@ -1,5 +1,5 @@
 export const SOURCE_CONFIG = {
-  enabled: { reddit: false, hackernews: true, devforums: false, snapshot: true },
+  enabled: { reddit: false, hackernews: true, devforums: false, snapshot: true, stackexchange: true },
   maxSignalsPerSource: 100,
   requestTimeoutMs: 10000,
   maxRetries: 3,

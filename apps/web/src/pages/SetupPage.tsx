@@ -113,7 +113,7 @@ function Field({ id, label, hint, error, children }: FieldProps) {
 
 export function SetupPage() {
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
-  const [selectedSources, setSelectedSources] = useState<SourceId[]>(['hackernews']);
+  const [selectedSources, setSelectedSources] = useState<SourceId[]>(['hackernews', 'stackexchange']);
   const [sourceError, setSourceError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitting, setSubmitting] = useState(false);
@@ -370,6 +370,24 @@ export function SetupPage() {
                 />
                 Hacker News
               </label>
+              <span className="badge badge-live">Live</span>
+            </li>
+            <li className="source-row">
+              <div>
+                <label htmlFor="source-stackexchange">
+                  <input
+                    id="source-stackexchange"
+                    type="checkbox"
+                    checked={selectedSources.includes('stackexchange')}
+                    aria-describedby="source-stackexchange-hint"
+                    onChange={(event) => updateSource('stackexchange', event.target.checked)}
+                  />
+                  Stack Exchange (Software Recommendations)
+                </label>
+                <p className="muted field-hint" id="source-stackexchange-hint">
+                  Questions where people ask for software recommendations.
+                </p>
+              </div>
               <span className="badge badge-live">Live</span>
             </li>
             <li className="source-row">
