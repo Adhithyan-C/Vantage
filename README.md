@@ -104,3 +104,5 @@ docs/       demo script, evaluation, limitations and ethics
 Implemented phases reflected in the current architecture amendments: 1, 2A, 3A, 3B, 4, 4.1, 5, 6, 6.1, 7A, 7B, 8A, and 8B. Reddit, developer-forum and review-site adapters, Displacement and themes, the approach suggester, Monitor, authentication, broader row-level-security policies, deployment, accessibility audit, and load testing are not implemented. See [ARCHITECTURE.md](ARCHITECTURE.md) for design and phase details.
 
 More documentation: [presentation script](docs/DEMO_SCRIPT.md), [evaluation](docs/EVALUATION.md), and [limitations and ethics](docs/LIMITATIONS_AND_ETHICS.md).
+
+Hacker News searches each keyword with separate Ask HN and story/comment requests, then combines results across keywords.

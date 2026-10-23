@@ -34,3 +34,5 @@ Displacement and themes, the Reddit adapter, developer-forum adapter, review-sit
 ## Misuse risks and limits
 
 Scores and labels can be mistaken for certainty, and summaries can overstate evidence. The interface exposes evidence and deterministic score components so a person can inspect the basis of a result; the labels and scores should still be treated as decision support, not proof of intent. The system is limited to public posts and does not supply personal contact details or automate outreach. Synthetic records remain visibly labelled and are not linked as real posts.
+
+Hacker News searches each keyword with separate Ask HN and story/comment requests, then combines results across keywords.
