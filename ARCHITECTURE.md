@@ -1280,4 +1280,32 @@ alter table source_requests enable row level security;
 ### 30.8 Files
 supabase/migrations/0003_source_requests.sql, packages/shared types, utils/redact.ts, sources/*.ts (hackernews, stackexchange, snapshot, types), db/runs.ts, orchestrator/runPipeline.ts, routes/runs.ts, routes/report.ts, demo/schema.ts, demo/replay.ts, scripts/demo-record.ts, web lib/api.ts, hooks/useRunEvents.ts, lib/inbox.ts, components/SourceActivity.tsx, pages/RunPage.tsx, pages/InboxPage.tsx, pages/ReportPage.tsx, styles/tokens.css, plus tests. Do not edit fixtures/demo-run.json or fixtures/sample-signals.json.
 
+---
+
+## 31. Phase 7D: Hacker News coverage and classification priority (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 31.1 Problem observed in a live run
+A run with 10 keywords and maxResults 50 searched only the FIRST keyword on Hacker News, because that keyword alone filled the cap and the loop stopped; the other nine were never requested. The request log showed one request, taking about 20 seconds because of a timeout and a retry.
+
+### 31.2 Hacker News adapter (apps/api/src/sources/hackernews.ts)
+- Every keyword is searched. perKeywordLimit = min(100, max(5, ceil(maxResults / keywords.length))).
+- Two requests per keyword: (a) an "Ask" request with tags=ask_hn and hitsPerPage = min(20, perKeywordLimit); (b) the existing request with tags=(story,comment) and hitsPerPage = perKeywordLimit. Verify the ask_hn tag against the official Algolia HN documentation (hn.algolia.com/api) before coding; if the documentation does not support it, STOP and report.
+- Requests run with at most 3 in flight (a small promise-based limiter: reuse the classifier's semaphore if it is exported, otherwise add utils/concurrency.ts without changing the classifier). Results are collected per request and merged afterwards, so the output order is deterministic and independent of timing.
+- Merge order: all Ask results first, round-robin across keywords in keyword order (the first result of every keyword, then the second of every keyword, and so on), then the normal results in the same round-robin order. Dedupe by externalId (first occurrence wins) and apply the maxResults cap LAST, after merging.
+- Request log (ctx.onRequest, section 30): label = the keyword for the normal request and `${keyword} (Ask HN)` for the Ask request; one onRequest call per request as before.
+- Status rules, error handling, mapHit, text cleaning and the fixture-based behaviour stay as they are. Existing adapter tests must be updated to the new request pattern but keep their meaning.
+
+### 31.3 Classification priority
+- The classify stage receives the run's keywords: `ClassifyStage = (runId, onProgress, options?: { keywords?: string[] })`; runPipeline passes `{ keywords: params.keywords }`. Without options behaviour is unchanged (existing tests pass untouched).
+- When keywords are given, the signals are ordered by: (1) the number of distinct query terms found in the post text, descending; (2) createdAtSource, newest first; (3) signal id. Query terms are the lowercase words of all keywords with at least 4 characters, minus the stop words in a new constant QUERY_STOPWORDS in config/enrich.ts (need, looking, best, with, that, this, from, your, have, what, tool, tools, software, solution, solutions). Matching is a case-insensitive substring test on the stored text. The cap and the "newest N of M" warning wording are unchanged apart from this ordering.
+- config/llm.ts: maxClassifyPerRun becomes 40.
+
+### 31.4 Web
+Setup page: the Keywords hint becomes "Use 2 to 5 short, specific phrases. Long lists dilute the results."
+
+### 31.5 Files
+sources/hackernews.ts, utils/concurrency.ts (only if needed), agents/classifier.ts, orchestrator/runPipeline.ts, config/enrich.ts, config/llm.ts, web SetupPage.tsx, README.md and docs/LIMITATIONS_AND_ETHICS.md (one sentence each, Step 6), plus tests.
+
 

@@ -10,6 +10,7 @@ import { RUBRIC } from '../config/rubric';
 import type { DecisionRow, DecisionStore, RunSignalContext } from '../db/decisions';
 import { contentHash } from '../utils/hash';
 import { finalizeClassification } from '../verification/verifyQuote';
+import { QUERY_STOPWORDS } from '../config/enrich';
 
 export interface ClassifyConfig {
   concurrency: number;
@@ -31,7 +32,12 @@ export interface ClassifySummary {
 }
 
 export type ClassifyProgress = (done: number, total: number) => void | Promise<void>;
-export type ClassifyStage = (runId: string, onProgress?: ClassifyProgress) => Promise<ClassifySummary>;
+export type ClassifyRunOptions = { keywords?: string[] };
+export type ClassifyStage = (
+  runId: string,
+  onProgress?: ClassifyProgress,
+  options?: ClassifyRunOptions,
+) => Promise<ClassifySummary>;
 
 interface ClassifyStageOptions {
   llm: Pick<LlmClient, 'generateJson'>;
@@ -105,11 +111,24 @@ function recordFailureReasons(summary: ClassifySummary, providerErrors: Provider
 }
 
 export function createClassifyStage({ llm, store, config }: ClassifyStageOptions): ClassifyStage {
-  return async (runId, onProgress) => {
+  return async (runId, onProgress, options) => {
     const context = await store.getRunContext(runId);
-    const signals = [...context.signals].sort(
-      (left, right) => Date.parse(right.createdAtSource) - Date.parse(left.createdAtSource),
-    );
+    const stopwords = new Set<string>(QUERY_STOPWORDS);
+    const queryTerms = [...new Set((options?.keywords ?? []).flatMap((keyword) =>
+      keyword.toLowerCase().match(/[a-z0-9]+/g) ?? [],
+    ).filter((term) => term.length >= 4 && !stopwords.has(term)))];
+    const signals = [...context.signals].sort((left, right) => {
+      if (options?.keywords) {
+        const leftText = left.text.toLowerCase();
+        const rightText = right.text.toLowerCase();
+        const leftMatches = queryTerms.filter((term) => leftText.includes(term)).length;
+        const rightMatches = queryTerms.filter((term) => rightText.includes(term)).length;
+        if (leftMatches !== rightMatches) return rightMatches - leftMatches;
+      }
+      const newestFirst = Date.parse(right.createdAtSource) - Date.parse(left.createdAtSource);
+      if (newestFirst !== 0) return newestFirst;
+      return options?.keywords ? left.id.localeCompare(right.id) : 0;
+    });
     const selected = signals.slice(0, config.maxClassifyPerRun);
     const summary: ClassifySummary = {
       total: signals.length,

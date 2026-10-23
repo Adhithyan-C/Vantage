@@ -4,6 +4,7 @@ import type { SourceAdapter, SourceQuery, AdapterContext, AdapterResult } from '
 import { htmlToText } from '../utils/text.js';
 import { fetchWithRetry } from '../utils/rateLimit.js';
 import { sanitizeRequestError } from '../utils/redact.js';
+import { mapWithConcurrency } from '../utils/concurrency.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -15,10 +16,15 @@ function errorMessage(err: unknown): string {
 
 export const HN_ENDPOINT = 'https://hn.algolia.com/api/v1/search_by_date';
 
-export function buildHnUrl(keyword: string, sinceUnix: number, hitsPerPage: number): string {
+export function buildHnUrl(
+  keyword: string,
+  sinceUnix: number,
+  hitsPerPage: number,
+  tags = '(story,comment)',
+): string {
   const url = new URL(HN_ENDPOINT);
   url.searchParams.set('query', keyword);
-  url.searchParams.set('tags', '(story,comment)');
+  url.searchParams.set('tags', tags);
   url.searchParams.set('numericFilters', `created_at_i>${sinceUnix}`);
   url.searchParams.set('hitsPerPage', hitsPerPage.toString());
   return url.toString();
@@ -80,25 +86,29 @@ export const hackerNewsAdapter: SourceAdapter = {
     }
 
     const sinceUnix = Math.floor(ctx.now().getTime() / 1000) - query.sinceDays * 86400;
-    const hitsPerPage = Math.min(query.maxResults, 100);
-
-    const signals: RawSignal[] = [];
-    let attempted = 0;
+    const perKeywordLimit = Math.min(100, Math.max(5, Math.ceil(query.maxResults / query.keywords.length)));
+    type RequestResult = { hits: unknown[]; status: 'ok' | 'failed' };
+    type RequestSpec = { keyword: string; ask: boolean };
+    const requests: RequestSpec[] = [
+      ...query.keywords.map((keyword) => ({ keyword, ask: true })),
+      ...query.keywords.map((keyword) => ({ keyword, ask: false })),
+    ];
     let failedRequests = 0;
     let firstError: string | undefined;
-
-    const seenIds = new Set<string>();
-
-    for (const keyword of query.keywords) {
-      if (signals.length >= query.maxResults) break;
-      attempted++;
+    const outcomes = await mapWithConcurrency(requests, 3, async ({ keyword, ask }): Promise<RequestResult> => {
       const startedAt = ctx.now().getTime();
       let httpStatus: number | null = null;
       let itemsReturned = 0;
       let requestStatus: 'ok' | 'failed' = 'failed';
       let requestError: string | null = null;
+      let hits: unknown[] = [];
       try {
-        const url = buildHnUrl(keyword, sinceUnix, hitsPerPage);
+        const url = buildHnUrl(
+          keyword,
+          sinceUnix,
+          ask ? Math.min(20, perKeywordLimit) : perKeywordLimit,
+          ask ? 'ask_hn' : '(story,comment)',
+        );
         const response = await fetchWithRetry(ctx.fetch, url, {
           headers: { 'User-Agent': ctx.userAgent, Accept: 'application/json' },
           timeoutMs: ctx.timeoutMs,
@@ -115,20 +125,8 @@ export const hackerNewsAdapter: SourceAdapter = {
           throw new Error('HN response had no hits array');
         }
         itemsReturned = body.hits.length;
+        hits = body.hits;
         requestStatus = 'ok';
-
-        for (const hit of body.hits) {
-          if (signals.length >= query.maxResults) break;
-          const mapped = mapHit(hit);
-          if (!mapped) continue;
-          if (seenIds.has(mapped.externalId)) continue;
-          seenIds.add(mapped.externalId);
-
-          const parsed = RawSignalSchema.safeParse(mapped);
-          if (parsed.success) {
-            signals.push(parsed.data);
-          }
-        }
       } catch (err: unknown) {
         failedRequests++;
         const message = errorMessage(err);
@@ -138,7 +136,7 @@ export const hackerNewsAdapter: SourceAdapter = {
         try {
           ctx.onRequest?.({
             source: 'hackernews',
-            label: keyword,
+            label: ask ? `${keyword} (Ask HN)` : keyword,
             status: requestStatus,
             httpStatus,
             durationMs: Math.max(0, ctx.now().getTime() - startedAt),
@@ -150,11 +148,37 @@ export const hackerNewsAdapter: SourceAdapter = {
           // Request logging must not change adapter behavior.
         }
       }
+      return { hits, status: requestStatus };
+    });
+
+    function roundRobin(groups: unknown[][]): unknown[] {
+      const merged: unknown[] = [];
+      const maxLength = Math.max(0, ...groups.map((group) => group.length));
+      for (let index = 0; index < maxLength; index++) {
+        for (const group of groups) {
+          const hit = group[index];
+          if (hit !== undefined) merged.push(hit);
+        }
+      }
+      return merged;
+    }
+
+    const askGroups = outcomes.slice(0, query.keywords.length).map((outcome) => outcome.hits);
+    const normalGroups = outcomes.slice(query.keywords.length).map((outcome) => outcome.hits);
+    const seenIds = new Set<string>();
+    const signals: RawSignal[] = [];
+    for (const hit of [...roundRobin(askGroups), ...roundRobin(normalGroups)]) {
+      const mapped = mapHit(hit);
+      if (!mapped || seenIds.has(mapped.externalId)) continue;
+      seenIds.add(mapped.externalId);
+      const parsed = RawSignalSchema.safeParse(mapped);
+      if (parsed.success) signals.push(parsed.data);
+      if (signals.length >= query.maxResults) break;
     }
 
     let status: AdapterResult['status'] = 'ok';
     if (failedRequests > 0) {
-      if (failedRequests < attempted) {
+      if (failedRequests < requests.length) {
         status = 'degraded';
       } else {
         status = 'failed';

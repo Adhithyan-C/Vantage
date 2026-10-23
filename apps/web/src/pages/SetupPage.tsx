@@ -304,7 +304,7 @@ export function SetupPage() {
           <Field
             id="keywords"
             label="Keywords"
-            hint="Separate phrases with commas, up to 10."
+            hint="Use 2 to 5 short, specific phrases. Long lists dilute the results."
             error={errorOf('params.keywords')}
           >
             <input

@@ -8,7 +8,7 @@ export const temperature = 0;
 export const requestTimeoutMs = 30_000;
 export const maxValidationRetries = 2;
 export const concurrency = 1;
-export const maxClassifyPerRun = 30;
+export const maxClassifyPerRun = 40;
 export const maxPostChars = 2_000;
 export const promptVersion = 'classifier.v2';
 

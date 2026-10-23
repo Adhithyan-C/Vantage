@@ -316,6 +316,24 @@ describe('runPipeline', () => {
     expect(store.requestRecords[0]?.label).toBe('support');
   });
 
+  it('passes the run keywords to the classify stage', async () => {
+    const store = new FakeStore();
+    let receivedKeywords: string[] | undefined;
+    const classify: NonNullable<PipelineDeps['classify']> = async (_runId, _onProgress, options) => {
+      receivedKeywords = options?.keywords;
+      return {
+        total: 1, classified: 1, reused: 0, failed: 0,
+        labels: { buyer_intent: 0, competitor_complaint: 0, venting: 0, noise: 1 },
+        verifiedQuotes: 0, droppedQuotes: 0, capped: false, failureReasons: {},
+      };
+    };
+    await runPipeline({ store, adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })], ctx, classify }, RUN_ID, {
+      ...params,
+      keywords: ['support billing', 'customer service'],
+    });
+    expect(receivedKeywords).toEqual(['support billing', 'customer service']);
+  });
+
   it('warns when request log storage fails without changing run status', async () => {
     const store = new FakeStore();
     store.saveSourceRequestsError = new Error('request log unavailable');

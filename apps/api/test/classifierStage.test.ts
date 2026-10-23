@@ -83,6 +83,27 @@ describe('createClassifyStage', () => {
     expect(prompts[1]).toContain('post-3');
   });
 
+  it('prioritizes distinct keyword matches, then newest date, then signal id', async () => {
+    const older = { ...signal(1), id: 'z-old', text: 'billing invoices', createdAtSource: '2026-01-01T00:00:00Z' };
+    const tieB = { ...signal(2), id: 'b-new', text: 'billing invoices', createdAtSource: '2026-02-01T00:00:00Z' };
+    const tieA = { ...signal(3), id: 'a-new', text: 'BILLING INVOICES', createdAtSource: '2026-02-01T00:00:00Z' };
+    const oneMatch = { ...signal(4), id: 'c-one', text: 'billing need looking software', createdAtSource: '2026-03-01T00:00:00Z' };
+    const zeroMatches = { ...signal(5), id: 'd-zero', text: 'need looking best tools', createdAtSource: '2026-04-01T00:00:00Z' };
+    const { store, saved } = storeFor({ seller, signals: [zeroMatches, older, tieB, oneMatch, tieA] });
+    await createClassifyStage({ llm: llmFor(), store, config })('run-1', undefined, {
+      keywords: ['need looking best with that this from your have what tool tools software solution solutions billing invoices CRM api'],
+    });
+    expect(saved.map((row) => row.signalId)).toEqual(['a-new', 'b-new', 'z-old', 'c-one', 'd-zero']);
+  });
+
+  it('keeps the old newest-first ordering when keyword options are omitted', async () => {
+    const first = { ...signal(1), id: 'first', createdAtSource: '2026-01-01T00:00:00Z' };
+    const second = { ...signal(2), id: 'second', createdAtSource: '2026-03-01T00:00:00Z' };
+    const { store, saved } = storeFor({ seller, signals: [first, second] });
+    await createClassifyStage({ llm: llmFor(), store, config })('run-1');
+    expect(saved.map((row) => row.signalId)).toEqual(['second', 'first']);
+  });
+
   it('reuses matching cached output and saves a copy for the current run', async () => {
     const reusable = {
       model: 'cached-model',

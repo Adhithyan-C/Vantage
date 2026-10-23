@@ -175,7 +175,7 @@ export async function runPipeline(
       try {
         summary = await deps.classify(runId, async (done, total) => {
           await emit.progress('classifier', `Classified ${done} of ${total}`);
-        });
+        }, { keywords: params.keywords });
       } catch (err) {
         classificationFailed = true;
         await emit.error('classifier', `Classification failed: ${errorMessage(err)}`);

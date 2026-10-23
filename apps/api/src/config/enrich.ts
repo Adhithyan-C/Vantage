@@ -1,3 +1,8 @@
+export const QUERY_STOPWORDS = [
+  'need', 'looking', 'best', 'with', 'that', 'this', 'from', 'your', 'have', 'what',
+  'tool', 'tools', 'software', 'solution', 'solutions',
+] as const;
+
 export const PURCHASE_TERMS = [
   'price',
   'pricing',

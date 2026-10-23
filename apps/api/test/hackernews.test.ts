@@ -61,11 +61,11 @@ describe('Hacker News adapter', () => {
     expect(result.signals.length).toBe(0);
   });
 
-  it('the first fake request URL contains created_at_i and tags= (check the decoded URL contains "(story,comment)")', async () => {
+  it('normal request URLs contain created_at_i and tags=(story,comment)', async () => {
     const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
     await hackerNewsAdapter.search({ keywords: ['k1'], sinceDays: 30, maxResults: 10 }, getCtx(fetchFn));
-    const url = fetchFn.mock.calls[0]![0] as string;
-    const decoded = decodeURIComponent(url);
+    const normalUrl = String(fetchFn.mock.calls[1]![0]);
+    const decoded = decodeURIComponent(normalUrl);
     expect(decoded).toContain('created_at_i>');
     expect(decoded).toContain('tags=(story,comment)');
   });
@@ -101,8 +101,10 @@ describe('Hacker News adapter', () => {
     await hackerNewsAdapter.search({ keywords: ['billing'], sinceDays: 30, maxResults: 10 }, {
       ...getCtx(fetchFn), onRequest: (record) => records.push(record),
     });
-    expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ source: 'hackernews', label: 'billing', status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: null });
+    expect(records).toHaveLength(2);
+    expect(records.map((record) => record.label)).toEqual(['billing (Ask HN)', 'billing']);
+    expect(records.every((record) => record.status === 'ok' && record.itemsReturned === 1)).toBe(true);
+    expect(records[0]).toMatchObject({ source: 'hackernews', httpStatus: 200, quotaRemaining: null });
     expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -113,5 +115,106 @@ describe('Hacker News adapter', () => {
       ...getCtx(fetchFn), onRequest: (record) => records.push(record),
     });
     expect(records[0]).toMatchObject({ status: 'failed', httpStatus: 403, error: 'HN request failed with status 403' });
+  });
+
+  it('issues Ask and normal requests for every keyword with per-keyword limits', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
+    await hackerNewsAdapter.search({ keywords: ['one', 'two', 'three'], sinceDays: 30, maxResults: 30 }, getCtx(fetchFn));
+    expect(fetchFn).toHaveBeenCalledTimes(6);
+    const urls = fetchFn.mock.calls.map((call) => new URL(String(call[0])));
+    expect(urls.map((url) => url.searchParams.get('query'))).toContain('one');
+    expect(urls.map((url) => url.searchParams.get('query'))).toContain('two');
+    expect(urls.map((url) => url.searchParams.get('query'))).toContain('three');
+    expect(urls.slice(0, 3).every((url) => url.searchParams.get('tags') === 'ask_hn')).toBe(true);
+    expect(urls.slice(3).every((url) => url.searchParams.get('tags') === '(story,comment)')).toBe(true);
+    expect(urls.slice(0, 3).every((url) => url.searchParams.get('hitsPerPage') === '10')).toBe(true);
+  });
+
+  it.each([
+    { keywords: Array.from({ length: 10 }, (_, index) => `kw${index}`), maxResults: 50, expected: '5' },
+    { keywords: ['one', 'two'], maxResults: 100, expected: '50' },
+    { keywords: ['one'], maxResults: 100, expected: '100' },
+    { keywords: ['one'], maxResults: 1, expected: '5' },
+  ])('uses bounded per-keyword limits for $keywords.length keywords and cap $maxResults', async ({ keywords, maxResults, expected }) => {
+    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
+    await hackerNewsAdapter.search({ keywords, sinceDays: 30, maxResults }, getCtx(fetchFn));
+    const urls = fetchFn.mock.calls.map((call) => new URL(String(call[0])));
+    expect(urls.slice(0, keywords.length).every((url) =>
+      url.searchParams.get('hitsPerPage') === String(Math.min(20, Number(expected))),
+    )).toBe(true);
+    expect(urls.slice(keywords.length).every((url) => url.searchParams.get('hitsPerPage') === expected)).toBe(true);
+  });
+
+  it('never has more than three requests in flight', async () => {
+    let active = 0;
+    let maximum = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const fetchFn: typeof fetch = async () => {
+      active += 1;
+      maximum = Math.max(maximum, active);
+      await gate;
+      active -= 1;
+      return new Response(JSON.stringify({ hits: [] }), { status: 200 });
+    };
+    const pending = hackerNewsAdapter.search({ keywords: ['a', 'b', 'c'], sinceDays: 30, maxResults: 30 }, getCtx(fetchFn));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(maximum).toBe(3);
+    release?.();
+    await pending;
+    expect(maximum).toBe(3);
+  });
+
+  it('merges Ask results first and round-robins by keyword independent of response timing', async () => {
+    const hit = (id: string) => ({ objectID: id, author: 'user', title: `Post ${id}`, created_at: '2026-10-01T00:00:00Z' });
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      const keyword = url.searchParams.get('query');
+      const ask = url.searchParams.get('tags') === 'ask_hn';
+      await new Promise((resolve) => setTimeout(resolve, keyword === 'one' ? 5 : 0));
+      const prefix = ask ? 'ask' : 'normal';
+      const hits = keyword === 'one' ? [hit(`${prefix}-one-1`), hit(`${prefix}-one-2`)] : [hit(`${prefix}-two-1`), hit(`${prefix}-two-2`)];
+      return new Response(JSON.stringify({ hits }), { status: 200 });
+    };
+    const result = await hackerNewsAdapter.search({ keywords: ['one', 'two'], sinceDays: 30, maxResults: 8 }, getCtx(fetchFn));
+    expect(result.signals.map((signal) => signal.externalId)).toEqual([
+      'ask-one-1', 'ask-two-1', 'ask-one-2', 'ask-two-2',
+      'normal-one-1', 'normal-two-1', 'normal-one-2', 'normal-two-2',
+    ]);
+  });
+
+  it('dedupes on first occurrence and applies maxResults after merged ordering', async () => {
+    const hit = (id: string, title: string) => ({ objectID: id, author: 'user', title, created_at: '2026-10-01T00:00:00Z' });
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      const ask = url.searchParams.get('tags') === 'ask_hn';
+      return new Response(JSON.stringify({ hits: ask
+        ? [hit('duplicate', 'Ask version'), hit('ask-two', 'Ask second')]
+        : [hit('duplicate', 'Normal version'), hit('normal-two', 'Normal second')],
+      }), { status: 200 });
+    };
+    const result = await hackerNewsAdapter.search({ keywords: ['one'], sinceDays: 30, maxResults: 3 }, getCtx(fetchFn));
+    expect(result.signals.map((signal) => signal.externalId)).toEqual(['duplicate', 'ask-two', 'normal-two']);
+    expect(result.signals[0]?.text).toBe('Ask version');
+  });
+
+  it('request labels include the keyword and Ask HN suffix', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => new Response(JSON.stringify({ hits: [] }), { status: 200 });
+    await hackerNewsAdapter.search({ keywords: ['kw'], sinceDays: 30, maxResults: 10 }, {
+      ...getCtx(fetchFn), onRequest: (record) => records.push(record),
+    });
+    expect(records.map((record) => record.label)).toEqual(['kw (Ask HN)', 'kw']);
+  });
+
+  it('one failed request among multiple degrades the result while all failed requests fail it', async () => {
+    const partlyFailing = vi.fn()
+      .mockResolvedValueOnce(new Response('error', { status: 500 }))
+      .mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
+    const partial = await hackerNewsAdapter.search({ keywords: ['one'], sinceDays: 30, maxResults: 10 }, getCtx(partlyFailing));
+    expect(partial.status).toBe('degraded');
+    const failing = vi.fn().mockResolvedValue(new Response('error', { status: 500 }));
+    const allFailed = await hackerNewsAdapter.search({ keywords: ['one'], sinceDays: 30, maxResults: 10 }, getCtx(failing));
+    expect(allFailed.status).toBe('failed');
   });
 });
