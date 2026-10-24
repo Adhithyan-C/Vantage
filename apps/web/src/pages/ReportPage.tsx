@@ -4,6 +4,8 @@ import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { ApiError, getReport } from '../lib/api';
 import { LABEL_TEXT, shortId, SOURCE_LABEL, formatAge } from '../lib/format';
+import { ScoreMeter } from '../components/ScoreMeter';
+import { LoadingState } from '../components/LoadingState';
 
 const CRITERION_TEXT: Record<string, string> = {
   states_problem: 'States a problem',
@@ -19,48 +21,54 @@ function isRanked(signal: LeadView): boolean {
 
 function RankedSignal({ signal }: { signal: LeadView }) {
   return (
-    <article className="card report-signal">
-      <div className="report-signal-heading">
-        <h3>Rank {signal.rank}: {LABEL_TEXT[signal.label]}</h3>
-        {signal.source === 'snapshot' && <span className="badge">Sample data</span>}
-        <span className="badge">Score {signal.score}</span>
-      </div>
-      <p className="report-meta">
-        {signal.confidence === 1 ? 'Quotes verified' : signal.confidence !== null && signal.confidence < 1 ? 'Some quotes could not be verified' : ''}
-        {signal.confidence !== null ? ' · ' : ''}{SOURCE_LABEL[signal.source]}{signal.community ? ` · ${signal.community}` : ''} · @{signal.authorHandle} · {formatAge(signal.createdAtSource, Date.now())}
-      </p>
-      {signal.source === 'snapshot'
-        ? <p>Sample post (not a real link)</p>
-        : <p><a href={signal.url} target="_blank" rel="noopener noreferrer">Open original post</a></p>}
-      <section className="summary-card report-summary">
-        <h4>Summary (written by the model)</h4>
-        <p>{signal.rationale}</p>
-      </section>
-      <section>
-        <h4>Verified evidence</h4>
-        {signal.criteria.some((criterion) => criterion.passed && criterion.quote !== null) ? (
-          <ul className="report-evidence">
-            {signal.criteria.filter((criterion) => criterion.passed && criterion.quote !== null).map((criterion) => (
-              <li key={criterion.id}><strong>{CRITERION_TEXT[criterion.id]}</strong>: “{criterion.quote}”</li>
-            ))}
-          </ul>
-        ) : <p className="muted">No verified evidence quotes.</p>}
-      </section>
-      <div className="table-scroll">
-        <table>
-          <thead><tr><th>Component</th><th>Points</th></tr></thead>
-          <tbody>
-            {signal.breakdown.components.map((component) => (
-              <tr key={component.name}><td>{component.name}</td><td>{component.contribution}</td></tr>
-            ))}
-            <tr><th>Total</th><th>{signal.score}</th></tr>
-          </tbody>
-        </table>
-      </div>
-      <p className="report-facts">
-        Competitors mentioned: {signal.enrichment.competitorsMentioned.join(', ') || 'None'} · Purchase terms: {signal.enrichment.purchaseTermsFound.join(', ') || 'None'}
-      </p>
-    </article>
+    <tr className="report-signal-row">
+      <td className="mono">{signal.rank}</td>
+      <td className="report-signal-cell">
+        <span className={`badge label-${signal.label}`}>{LABEL_TEXT[signal.label]}</span>
+        <p>@{signal.authorHandle} · {SOURCE_LABEL[signal.source]}{signal.community ? ` · ${signal.community}` : ''}</p>
+        <p className="report-meta mono">{formatAge(signal.createdAtSource, Date.now())}</p>
+        {signal.confidence === 1 ? <p className="verification-note">Quotes verified</p>
+          : signal.confidence !== null && signal.confidence < 1 ? <p className="verification-note">Some quotes could not be verified</p> : null}
+        {signal.source === 'snapshot'
+          ? <p>Sample post (not a real link)</p>
+          : <a href={signal.url} target="_blank" rel="noopener noreferrer">Open original post</a>}
+      </td>
+      <td><ScoreMeter score={signal.score} /></td>
+      <td>
+        <details className="why-disclosure">
+          <summary>Why this rank?</summary>
+          <div className="report-why">
+            <h4>Reasoning</h4>
+            <p>{signal.rationale}</p>
+            <h4>Verified evidence</h4>
+            {signal.criteria.some((criterion) => criterion.passed && criterion.quote !== null) ? (
+              <ul className="report-evidence">
+                {signal.criteria.filter((criterion) => criterion.passed && criterion.quote !== null).map((criterion) => (
+                  <li key={criterion.id}><span className="evidence-criterion">{CRITERION_TEXT[criterion.id]}</span>
+                    {signal.source === 'snapshot'
+                      ? <blockquote>“{criterion.quote}”</blockquote>
+                      : <a href={signal.url} target="_blank" rel="noopener noreferrer"><blockquote>“{criterion.quote}”</blockquote></a>}
+                  </li>
+                ))}
+              </ul>
+            ) : <p className="muted">No verified evidence quotes.</p>}
+            <h4>Score breakdown</h4>
+            <div className="table-scroll">
+              <table className="score-breakdown-table">
+                <thead><tr><th>Component</th><th>Value</th><th>Weight</th><th>Points</th></tr></thead>
+                <tbody>
+                  {signal.breakdown.components.map((component) => (
+                    <tr key={component.name}><td>{component.name}</td><td className="mono">{(component.value * 100).toFixed(0)}%</td><td className="mono">{(component.weight * 100).toFixed(0)}%</td><td className="mono">{component.contribution}</td></tr>
+                  ))}
+                  <tr><th>Total</th><th colSpan={2}></th><th className="mono">{signal.score}</th></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="report-facts">Competitors mentioned: {signal.enrichment.competitorsMentioned.join(', ') || 'None'} · Purchase terms: {signal.enrichment.purchaseTermsFound.join(', ') || 'None'}</p>
+          </div>
+        </details>
+      </td>
+    </tr>
   );
 }
 
@@ -113,16 +121,21 @@ export function ReportContent({ report }: { report: ReportView }) {
 
       <section className="stack" aria-labelledby="ranked-signals-title">
         <h2 className="card-title" id="ranked-signals-title">Ranked signals</h2>
-        {rankedSignals.length > 0 ? rankedSignals.map((signal) => (
-          <RankedSignal key={signal.leadId} signal={signal} />
-        )) : (
-          <EmptyState title="No buying signals in this run" hint="Other signals in this run were classified as venting or noise." />
+        {rankedSignals.length > 0 ? (
+          <div className="table-scroll report-table-scroll">
+            <table className="report-table">
+              <thead><tr><th scope="col">Rank</th><th scope="col">Signal</th><th scope="col">Score</th><th scope="col">Why</th></tr></thead>
+              <tbody>{rankedSignals.map((signal) => <RankedSignal key={signal.leadId} signal={signal} />)}</tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState title="No buying signals in this run" hint="Other signals in this run were classified as venting or noise." action={{ label: 'Review all signals', href: `#/runs/${encodeURIComponent(report.run.id)}/signals` }} />
         )}
       </section>
 
       <section className="card" aria-labelledby="other-signals-title">
         <h2 className="card-title" id="other-signals-title">Other signals</h2>
-        {otherSignals.length === 0 ? <p className="muted">No other signals.</p> : (
+        {otherSignals.length === 0 ? <p className="muted">No other signals. <a href="#ranked-signals-title">Review ranked signals</a></p> : (
           <div className="table-scroll">
             <table>
               <thead><tr><th>Label</th><th>Score</th><th>Source</th><th>Handle</th><th>Age</th><th>Summary</th></tr></thead>
@@ -173,7 +186,7 @@ export function ReportPage({ runId }: { runId: string }) {
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
-    return <div className="card" role="status">Loading report…</div>;
+    return <LoadingState label="Loading report" />;
   }
   if (error instanceof ApiError && error.status === 409) {
     return <div className="card" role="status">The report is available when the run has finished.</div>;

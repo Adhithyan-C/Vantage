@@ -5,6 +5,7 @@ import { PipelineProgress, RunStatusBadge } from '../components/PipelineProgress
 import { SourceActivity } from '../components/SourceActivity';
 import { useRunEvents } from '../hooks/useRunEvents';
 import { EVENT_KIND_LABEL, formatClock, formatDuration, shortId } from '../lib/format';
+import { LoadingState } from '../components/LoadingState';
 
 export function RunPage({ runId }: { runId: string }) {
   const { run, events, requests, error, retry } = useRunEvents(runId);
@@ -28,9 +29,7 @@ export function RunPage({ runId }: { runId: string }) {
       return <ErrorState title="Could not load this run" message={error} onRetry={retry} />;
     }
     return (
-      <div className="card" role="status">
-        Loading run…
-      </div>
+      <LoadingState label="Loading run" />
     );
   }
 
@@ -45,7 +44,7 @@ export function RunPage({ runId }: { runId: string }) {
               {run.seller.productName}
             </h1>
             <p className="muted">
-              Run {shortId(run.id)} · started {formatClock(run.startedAt)}
+              Run <span className="mono">{shortId(run.id)}</span> · started <span className="mono">{formatClock(run.startedAt)}</span>
               {duration ? ` · ${duration}` : ''}
             </p>
           </div>
@@ -85,6 +84,7 @@ export function RunPage({ runId }: { runId: string }) {
             <EmptyState
               title="No signals found"
               hint="Try different keywords or a longer time window."
+              action={{ label: 'Start a new search', href: '#/' }}
             />
           ) : (
             <p className="report-actions">

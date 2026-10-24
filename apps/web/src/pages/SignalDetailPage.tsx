@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { FeedbackAction, LeadDetail } from '@vantage/shared';
+import type { CriterionId, FeedbackAction, LeadDetail } from '@vantage/shared';
 import { ApiError, getLeadDetail, sendFeedback } from '../lib/api';
 import { formatAge, LABEL_TEXT, SOURCE_LABEL } from '../lib/format';
 import { isRankedLabel } from '../lib/inbox';
@@ -9,6 +9,16 @@ import { EvidenceQuote } from '../components/EvidenceQuote';
 import { CriteriaChecklist } from '../components/CriteriaChecklist';
 import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { ReasoningTrace } from '../components/ReasoningTrace';
+import { LoadingState } from '../components/LoadingState';
+import { ScoreMeter } from '../components/ScoreMeter';
+
+const CRITERION_LABEL: Record<CriterionId, string> = {
+  states_problem: 'States a problem',
+  asks_for_recommendation: 'Asks for a recommendation',
+  mentions_team_or_budget: 'Mentions team or budget',
+  shows_urgency: 'Shows urgency',
+  names_competitor: 'Names a competitor',
+};
 
 export function DiscardedQuotesNote({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -55,25 +65,29 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
     }
   }
 
-  if (loading) return <div className="card" role="status">Loading signal…</div>;
-  if (notFound) return <div className="stack"><a href={`#/runs/${encodeURIComponent(runId)}/signals`}>Back to inbox</a><EmptyState title="Signal not found" /></div>;
+  if (loading) return <LoadingState label="Loading signal" />;
+  if (notFound) return <div className="stack"><a className="back-link" href={`#/runs/${encodeURIComponent(runId)}/signals`}>Back to inbox</a><EmptyState title="Signal not found" hint="This signal may have been removed from the run." action={{ label: 'Return to inbox', href: `#/runs/${encodeURIComponent(runId)}/signals` }} /></div>;
   if (error) return <ErrorState title="Could not load this signal" message={error} onRetry={() => void load()} />;
-  if (!detail) return <EmptyState title="Signal not found" />;
+  if (!detail) return <EmptyState title="Signal not found" hint="Return to the inbox to choose another signal." action={{ label: 'Return to inbox', href: `#/runs/${encodeURIComponent(runId)}/signals` }} />;
 
   const { lead } = detail;
   const ranked = isRankedLabel(lead.label);
   return (
     <div className="stack">
-      <a href={`#/runs/${encodeURIComponent(runId)}/signals`}>Back to inbox</a>
+      <a className="back-link" href={`#/runs/${encodeURIComponent(runId)}/signals`}>Back to inbox</a>
       <section className="card stack" aria-labelledby="signal-title">
         <div className="signal-card-top">
-          <span className="badge">{LABEL_TEXT[lead.label]}</span>
+          <span className={`badge label-${lead.label}`}>{LABEL_TEXT[lead.label]}</span>
           {lead.source === 'snapshot' && <span className="badge">Sample data</span>}
-          {ranked ? <><span className="badge">Rank {lead.rank}</span><span className="badge">Score {lead.score}</span></> : <span className="badge">Not ranked</span>}
+          {ranked ? <><span className="badge">Rank {lead.rank}</span><ScoreMeter score={lead.score} /></> : <span className="badge">Not ranked</span>}
           <span className={`badge status-${lead.status}`}>{lead.status === 'new' ? 'New' : lead.status === 'accepted' ? 'Accepted' : 'Rejected'}</span>
         </div>
         <h1 className="page-title" id="signal-title">@{lead.authorHandle}</h1>
-        <p className="muted">{SOURCE_LABEL[lead.source]}{lead.community ? ` · ${lead.community}` : ''} · {formatAge(lead.createdAtSource, Date.now())}</p>
+        <p className="signal-meta">{SOURCE_LABEL[lead.source]}{lead.community ? ` · ${lead.community}` : ''} · <span className="mono">{formatAge(lead.createdAtSource, Date.now())}</span></p>
+        <div className="detail-why-links">
+          <a className="why-link" href="#classification-why">Why this label?</a>
+          {ranked && <a className="why-link" href="#score-why">Why this score?</a>}
+        </div>
         {lead.source === 'snapshot'
           ? <p>Sample post (not a real link)</p>
           : <p><a href={lead.url} target="_blank" rel="noopener noreferrer">Open original post</a></p>}
@@ -90,13 +104,27 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
         <h2 className="card-title" id="post-title">Post text</h2>
         <EvidenceQuote text={detail.text} spans={detail.evidence} />
       </section>
-      <section className="card summary-card">
-        <h2 className="card-title">Summary (written by the model)</h2>
+      <section className="card reasoning-block" id="classification-why" aria-labelledby="reasoning-title">
+        <p className="eyebrow">CLASSIFIER EXPLANATION</p>
+        <h2 className="card-title" id="reasoning-title">Reasoning</h2>
         <p>{lead.rationale}</p>
+        <h3 className="card-subtitle">Evidence quotes</h3>
+        {lead.criteria.some((criterion) => criterion.passed && criterion.quote) ? (
+          <ul className="evidence-links">
+            {lead.criteria.filter((criterion) => criterion.passed && criterion.quote).map((criterion) => (
+              <li key={criterion.id}>
+                <span className="evidence-criterion">{CRITERION_LABEL[criterion.id]}</span>
+                {lead.source === 'snapshot'
+                  ? <blockquote>“{criterion.quote}”</blockquote>
+                  : <a href={lead.url} target="_blank" rel="noopener noreferrer"><blockquote>“{criterion.quote}”</blockquote></a>}
+              </li>
+            ))}
+          </ul>
+        ) : <p className="muted">No evidence quotes were verified for this signal.</p>}
         <DiscardedQuotesNote count={detail.discardedQuotes} />
       </section>
-      <section className="card"><h2 className="card-title">Criteria checklist</h2><CriteriaChecklist criteria={lead.criteria} /></section>
-      <section className="card"><h2 className="card-title">Score breakdown</h2><ScoreBreakdown lead={lead} /></section>
+      <section className="card"><h2 className="card-title">Classification criteria</h2><CriteriaChecklist criteria={lead.criteria} /></section>
+      <section className="card" id="score-why"><p className="eyebrow">DETERMINISTIC SCORE</p><h2 className="card-title">Why this score?</h2><ScoreBreakdown lead={lead} /></section>
       <section className="card">
         <h2 className="card-title">Signal facts</h2>
         <dl className="facts-grid">

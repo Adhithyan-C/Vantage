@@ -6,6 +6,8 @@ import { countSignalGroups, countSignalsBySource, filterSignals } from '../lib/i
 import type { LabelFilter, SourceFilter, StatusFilter } from '../lib/inbox';
 import { ErrorState } from '../components/ErrorState';
 import { SignalCard } from '../components/SignalCard';
+import { EmptyState } from '../components/EmptyState';
+import { LoadingState } from '../components/LoadingState';
 
 export function InboxPage({ runId }: { runId: string }) {
   const [run, setRun] = useState<RunView | null>(null);
@@ -35,7 +37,7 @@ export function InboxPage({ runId }: { runId: string }) {
   useEffect(() => { void load(); }, [load]);
 
   if (loading) {
-    return <div className="card" role="status">Loading signals…</div>;
+    return <LoadingState label="Loading signals" />;
   }
   if (error) {
     return <ErrorState title="Could not load signals" message={error} onRetry={() => void load()} />;
@@ -44,7 +46,11 @@ export function InboxPage({ runId }: { runId: string }) {
     return <ErrorState title="Could not load this run" message="Run not found." onRetry={() => void load()} />;
   }
   if (signals.length === 0) {
-    return <section className="stack"><a href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a><h1 className="page-title">{run.seller.productName}</h1><p className="muted">Run {shortId(run.id)}</p><p><a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a></p><div className="card">No signals were scored for this run yet</div></section>;
+    return <section className="stack">
+      <a className="back-link" href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a>
+      <header className="page-heading"><p className="eyebrow">SIGNAL INBOX · RUN {shortId(run.id)}</p><h1 className="page-title">{run.seller.productName}</h1></header>
+      <EmptyState title="No signals found" hint="Try different keywords or a longer time window." action={{ label: 'Review run', href: `#/runs/${encodeURIComponent(run.id)}` }} />
+    </section>;
   }
 
   const counts = countSignalGroups(signals);
@@ -62,12 +68,14 @@ export function InboxPage({ runId }: { runId: string }) {
 
   return (
     <div className="stack">
-      <a href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a>
+      <a className="back-link" href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a>
       <section className="card" aria-labelledby="inbox-title">
-        <h1 className="page-title" id="inbox-title">{run.seller.productName}</h1>
-        <p className="muted">Run {shortId(run.id)}</p>
-        <p>{counts.buying} buying signals, {counts.other} other signals</p>
-        <p><a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a></p>
+        <div className="page-heading">
+          <p className="eyebrow">SIGNAL INBOX · RUN <span className="mono">{shortId(run.id)}</span></p>
+          <h1 className="page-title" id="inbox-title">{run.seller.productName}</h1>
+          <p className="muted">{counts.buying} buying signals · {counts.other} other signals</p>
+        </div>
+        <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>Open report</a>
       </section>
       <section className="card filter-panel" aria-label="Signal filters">
         <div className="field-row">
@@ -104,14 +112,11 @@ export function InboxPage({ runId }: { runId: string }) {
         </label>
       </section>
       {visibleSignals.length === 0 && !showOtherSignals && counts.other > 0 && defaultRankedCount === 0 ? (
-        <section className="card empty">
-          <p className="empty-title">No buying signals in this run. {counts.other} other signals were classified as venting or noise.</p>
-          <button className="btn btn-primary" type="button" onClick={() => setShowOtherSignals(true)}>Show other signals</button>
-        </section>
+        <EmptyState title="No buying signals in this run" hint={`${counts.other} other signals were classified as venting or noise.`} action={{ label: 'Show other signals', onClick: () => setShowOtherSignals(true) }} />
       ) : visibleSignals.length === 0 ? (
-        <div className="card">No signals match these filters.</div>
+        <EmptyState title="No signals match these filters" hint="Clear the filters to see all signals in this run." action={{ label: 'Clear filters', onClick: () => { setShowOtherSignals(false); setLabel('all'); setStatus('all'); setSource('all'); setMinScore(''); } }} />
       ) : (
-        <div className="stack">{visibleSignals.map((signal) => <SignalCard key={signal.leadId} signal={signal} runId={runId} />)}</div>
+        <div className="signal-list">{visibleSignals.map((signal, index) => <SignalCard key={signal.leadId} signal={signal} runId={runId} animationIndex={index} />)}</div>
       )}
     </div>
   );
