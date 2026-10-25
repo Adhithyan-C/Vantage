@@ -14,6 +14,7 @@ describe('DemoRunSchema', () => {
       run.id, run.id, LEAD_ID, run.id,
     ]);
     expect(parsed.requests).toEqual([]);
+    expect(parsed.themes).toEqual([]);
   });
 
   it('accepts a fixture containing request views', () => {

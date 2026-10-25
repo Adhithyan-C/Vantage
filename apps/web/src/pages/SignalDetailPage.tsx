@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { CriterionId, FeedbackAction, LeadDetail } from '@vantage/shared';
+import type { CriterionId, DecisionTrace, FeedbackAction, LeadDetail } from '@vantage/shared';
 import { ApiError, getLeadDetail, sendFeedback } from '../lib/api';
 import { formatAge, LABEL_TEXT, SOURCE_LABEL } from '../lib/format';
 import { isRankedLabel } from '../lib/inbox';
@@ -19,6 +19,28 @@ const CRITERION_LABEL: Record<CriterionId, string> = {
   shows_urgency: 'Shows urgency',
   names_competitor: 'Names a competitor',
 };
+
+export function CriticTrustReview({ trace }: { trace: DecisionTrace | null | undefined }) {
+  if (!trace) return null;
+  const verdict = trace.output.verdict;
+  if (trace.status !== 'ok' || (verdict !== 'supported' && verdict !== 'weak' && verdict !== 'unsupported')) {
+    return <span className="badge">Trust review unavailable</span>;
+  }
+  const issues = Array.isArray(trace.output.issues)
+    ? trace.output.issues.filter((issue): issue is string => typeof issue === 'string')
+    : [];
+  return (
+    <div className="critic-trust-review">
+      <span className={`badge critic-${verdict}`}>Trust review: {verdict}</span>
+      {(verdict === 'weak' || verdict === 'unsupported') && issues.length > 0 && (
+        <details>
+          <summary>Review issues</summary>
+          <ul>{issues.map((issue, index) => <li key={`${index}-${issue}`}>{issue}</li>)}</ul>
+        </details>
+      )}
+    </div>
+  );
+}
 
 export function DiscardedQuotesNote({ count }: { count: number }) {
   if (count <= 0) return null;
@@ -81,6 +103,7 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
           {lead.source === 'snapshot' && <span className="badge">Sample data</span>}
           {ranked ? <><span className="badge">Rank {lead.rank}</span><ScoreMeter score={lead.score} /></> : <span className="badge">Not ranked</span>}
           <span className={`badge status-${lead.status}`}>{lead.status === 'new' ? 'New' : lead.status === 'accepted' ? 'Accepted' : 'Rejected'}</span>
+          <CriticTrustReview trace={detail.criticTrace} />
         </div>
         <h1 className="page-title" id="signal-title">@{lead.authorHandle}</h1>
         <p className="signal-meta">{SOURCE_LABEL[lead.source]}{lead.community ? ` · ${lead.community}` : ''} · <span className="mono">{formatAge(lead.createdAtSource, Date.now())}</span></p>

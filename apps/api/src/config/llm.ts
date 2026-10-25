@@ -11,6 +11,9 @@ export const concurrency = 1;
 export const maxClassifyPerRun = 40;
 export const maxPostChars = 2_000;
 export const promptVersion = 'classifier.v2';
+export const maxCriticPerRun = 15;
+export const criticPromptVersion = 'critic.v1';
+export const enableCritic = true;
 
 export function parseProviderOrder(raw?: string): LlmProvider[] {
   const providers = raw
@@ -39,18 +42,30 @@ export const LLM_CONFIG = {
   maxClassifyPerRun,
   maxPostChars,
   promptVersion,
+  maxCriticPerRun,
+  criticPromptVersion,
+  get enableCritic() {
+    return process.env.ENABLE_CRITIC !== 'false';
+  },
 };
 
 export function resolveLlmConfig(overrides: {
   GEMINI_MODEL?: string;
   GROQ_MODEL?: string;
   LLM_PROVIDER_ORDER?: string;
+  ENABLE_CRITIC?: string | boolean;
 } = {}) {
   const providerSetting = overrides.LLM_PROVIDER_ORDER ?? process.env.LLM_PROVIDER_ORDER;
+  const criticSetting = overrides.ENABLE_CRITIC ?? process.env.ENABLE_CRITIC;
   return {
     ...LLM_CONFIG,
     geminiModel: overrides.GEMINI_MODEL?.trim() || process.env.GEMINI_MODEL?.trim() || geminiModel,
     groqModel: overrides.GROQ_MODEL?.trim() || process.env.GROQ_MODEL?.trim() || groqModel,
     providerOrder: parseProviderOrder(providerSetting),
+    maxCriticPerRun,
+    criticPromptVersion,
+    enableCritic: typeof criticSetting === 'boolean'
+      ? criticSetting
+      : criticSetting !== 'false',
   };
 }

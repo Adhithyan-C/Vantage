@@ -4,7 +4,11 @@ import type { SourceAdapter, AdapterContext } from '../sources/types';
 import { runScout } from '../agents/scout';
 import type { ClassifyStage, ClassifySummary } from '../agents/classifier';
 import type { ScoreStage } from '../agents/scorer';
-import { maxClassifyPerRun } from '../config/llm';
+import type { CriticStage } from '../agents/critic';
+import type { DisplaceStage } from '../agents/displacement';
+import { MIN_SIGNALS_PER_COMPETITOR } from '../config/displacement';
+import type { ThemeStore } from '../db/themes';
+import { maxClassifyPerRun, maxCriticPerRun } from '../config/llm';
 import { createEmitter } from './events';
 
 export interface PipelineDeps {
@@ -12,6 +16,11 @@ export interface PipelineDeps {
   adapters: SourceAdapter[];
   ctx: AdapterContext;
   classify?: ClassifyStage;
+  critic?: CriticStage;
+  enableCritic?: boolean;
+  displace?: DisplaceStage;
+  enableDisplacement?: boolean;
+  themes?: ThemeStore;
   score?: ScoreStage;
   runner?: (deps: PipelineDeps, runId: string, params: RunParams) => Promise<void>;
   demoMode?: boolean;
@@ -160,7 +169,9 @@ export async function runPipeline(
     }
 
     let classificationFailed = false;
+    let criticFailed = false;
     let scoringFailed = false;
+    let displacementFailed = false;
     if (deps.classify && result.afterDedupe > 0) {
       await emit.progress('classifier', `Classifying ${result.afterDedupe} signal(s)`, {
         total: result.afterDedupe,
@@ -207,6 +218,25 @@ export async function runPipeline(
           );
         }
         const classified = summary.classified;
+        if (deps.critic && deps.enableCritic !== false && classified > 0) {
+          const total = Math.min(classified, maxCriticPerRun);
+          await emit.progress('critic', `Reviewing ${total} signal(s)`, { total });
+          try {
+            const criticSummary = await deps.critic(runId);
+            await emit.info(
+              'critic',
+              `Reviewed ${criticSummary.reviewed} signal(s)`,
+              { reviewed: criticSummary.reviewed, failed: criticSummary.failed },
+            );
+            if (criticSummary.failed > 0) {
+              criticFailed = true;
+              await emit.warning('critic', `${criticSummary.failed} review(s) could not be completed`);
+            }
+          } catch (err) {
+            criticFailed = true;
+            await emit.error('critic', `Critic review failed: ${errorMessage(err)}`);
+          }
+        }
         if (deps.score && classified > 0) {
           await emit.progress('enricher', `Enriching ${classified} classified signal(s)`, {
             total: classified,
@@ -234,6 +264,38 @@ export async function runPipeline(
                 'No buyer intent or competitor complaint signals in this run',
               );
             }
+            if (deps.displace && deps.enableDisplacement !== false && scoreSummary.scored > 0) {
+              await emit.progress('displacement', 'Clustering competitor complaints');
+              try {
+                const displacement = await deps.displace(runId);
+                const counts = {
+                  complaintSignals: displacement.complaintSignals,
+                  competitors: displacement.competitors,
+                  skipped: displacement.skippedCompetitors.length,
+                  themeCount: displacement.themeCount,
+                };
+                if (displacement.themeCount > 0) {
+                  await emit.info(
+                    'displacement',
+                    `Found ${displacement.themeCount} theme(s) from ${displacement.complaintSignals} complaint signal(s)`,
+                    counts,
+                  );
+                } else if (displacement.complaintSignals === 0) {
+                  await emit.info('displacement', 'No competitor complaint signals to cluster', {
+                    complaintSignals: 0,
+                  });
+                } else {
+                  await emit.warning(
+                    'displacement',
+                    `No competitor themes found (${displacement.complaintSignals} complaint signal(s); at least ${MIN_SIGNALS_PER_COMPETITOR} per competitor are needed)`,
+                    counts,
+                  );
+                }
+              } catch (err) {
+                displacementFailed = true;
+                await emit.error('displacement', `Displacement failed: ${errorMessage(err)}`);
+              }
+            }
           } catch (err) {
             scoringFailed = true;
             await emit.error('scorer', `Scoring failed: ${errorMessage(err)}`);
@@ -243,7 +305,7 @@ export async function runPipeline(
     }
 
     const sourceStatus = computeRunStatus(result.sources);
-    const status = sourceStatus === 'completed' && (classificationFailed || scoringFailed)
+    const status = sourceStatus === 'completed' && (classificationFailed || criticFailed || scoringFailed || displacementFailed)
       ? 'completed_with_warnings'
       : sourceStatus;
     await store.setRunStatus(runId, status, true);

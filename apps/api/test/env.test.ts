@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { loadEnv } from '../src/config/env.js';
-import { parseProviderOrder } from '../src/config/llm';
+import { parseProviderOrder, resolveLlmConfig } from '../src/config/llm';
 
 describe('loadEnv', () => {
   it('when REDDIT_CLIENT_ID and REDDIT_CLIENT_SECRET are given along with the 4 required variables, loadEnv returns them', () => {
@@ -25,6 +25,61 @@ describe('loadEnv', () => {
     });
     expect(env.PORT).toBe(3001);
     expect(env.DEMO_MODE).toBe(false);
+    expect(env.ENABLE_CRITIC).toBe(true);
+    expect(env.ENABLE_DISPLACEMENT).toBe(true);
+  });
+
+  it.each([
+    ['true', true],
+    ['false', false],
+  ] as const)('parses ENABLE_CRITIC=%s as %s', (value, expected) => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      ENABLE_CRITIC: value,
+    });
+    expect(env.ENABLE_CRITIC).toBe(expected);
+  });
+
+  it('rejects ENABLE_CRITIC values other than literal true or false', () => {
+    expect(() => loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      ENABLE_CRITIC: 'yes',
+    })).toThrow('ENABLE_CRITIC');
+  });
+
+  it.each([
+    ['true', true],
+    ['false', false],
+  ] as const)('parses ENABLE_DISPLACEMENT=%s as %s', (value, expected) => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      ENABLE_DISPLACEMENT: value,
+    });
+    expect(env.ENABLE_DISPLACEMENT).toBe(expected);
+  });
+
+  it('rejects ENABLE_DISPLACEMENT values other than literal true or false', () => {
+    expect(() => loadEnv({
+      SUPABASE_URL: 'x',
+      SUPABASE_SERVICE_ROLE_KEY: 'x',
+      REDDIT_USER_AGENT: 'x',
+      ENABLE_DISPLACEMENT: 'yes',
+    })).toThrow('ENABLE_DISPLACEMENT');
+  });
+
+  it('resolves the critic defaults and literal enable override', () => {
+    expect(resolveLlmConfig({ ENABLE_CRITIC: 'true' })).toMatchObject({
+      enableCritic: true,
+      maxCriticPerRun: 15,
+      criticPromptVersion: 'critic.v1',
+    });
+    expect(resolveLlmConfig({ ENABLE_CRITIC: 'false' }).enableCritic).toBe(false);
   });
 
   it('allows a Groq-only configuration without a Gemini API key', () => {

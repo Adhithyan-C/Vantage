@@ -15,6 +15,8 @@ const EnvSchema = z.object({
   STACKEXCHANGE_KEY: z.string().min(1).optional(),
   STACKEXCHANGE_SITES: z.string().optional(),
   GITHUB_TOKEN: z.string().min(1).optional(),
+  ENABLE_CRITIC: z.enum(['true', 'false']).default('true').transform((val) => val === 'true'),
+  ENABLE_DISPLACEMENT: z.enum(['true', 'false']).default('true').transform((val) => val === 'true'),
   DEMO_MODE: z.enum(['true', 'false']).default('false').transform((val) => val === 'true'),
   PORT: z.string().optional().default('3001').transform(Number).pipe(z.number().int().min(1).max(65535))
 });

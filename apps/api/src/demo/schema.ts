@@ -153,6 +153,23 @@ const SourceRequestSchema = z.object({
   createdAt: isoDate,
 });
 
+const ThemeQuoteSchema = z.object({
+  signalId: z.string(),
+  criterion: z.enum(CRITERION_IDS),
+  quote: z.string(),
+});
+
+const ThemeViewSchema = z.object({
+  id: z.string(),
+  runId: z.string(),
+  competitor: z.string(),
+  title: z.string(),
+  summary: z.string(),
+  quotes: z.array(ThemeQuoteSchema),
+  members: z.array(z.object({ signalId: z.string(), leadId: z.string().nullable() })),
+  sampleData: z.boolean(),
+});
+
 export const DemoRunSchema = z.object({
   version: z.literal(1),
   recordedAt: isoDate,
@@ -162,6 +179,7 @@ export const DemoRunSchema = z.object({
   leads: z.array(LeadViewSchema),
   details: z.record(z.string(), LeadDetailSchema),
   requests: z.array(SourceRequestSchema).default([]),
+  themes: z.array(ThemeViewSchema).default([]),
 }).refine(
   (fixture) => fixture.leads.every((lead) => Object.hasOwn(fixture.details, lead.leadId)),
   { message: 'Every recorded signal must have a detail entry', path: ['details'] },

@@ -13,6 +13,7 @@ import {
   SellerProfileInputSchema,
   CriterionResultSchema,
   ClassifierOutputSchema,
+  CriticOutputSchema,
   ScoreComponentSchema,
   ScoreBreakdownSchema,
   RunParamsSchema,
@@ -29,6 +30,7 @@ export type RawSignal = z.infer<typeof RawSignalSchema>;
 export type SellerProfileInput = z.infer<typeof SellerProfileInputSchema>;
 export type CriterionResult = z.infer<typeof CriterionResultSchema>;
 export type ClassifierOutput = z.infer<typeof ClassifierOutputSchema>;
+export type CriticOutput = z.infer<typeof CriticOutputSchema>;
 export type ScoreComponent = z.infer<typeof ScoreComponentSchema>;
 export type ScoreBreakdown = z.infer<typeof ScoreBreakdownSchema>;
 
@@ -94,6 +96,7 @@ export interface LeadDetail {
   evidence: EvidenceSpan[];
   discardedQuotes: number;
   trace: DecisionTrace;
+  criticTrace?: DecisionTrace | null;
 }
 export type RunStatus = (typeof RUN_STATUSES)[number];
 export type SourceStatus = (typeof SOURCE_STATUSES)[number];
@@ -117,6 +120,23 @@ export interface RequestRecord {
 export interface SourceRequestView extends RequestRecord {
   id: number;
   createdAt: string;
+}
+
+export interface ThemeQuote {
+  signalId: string;
+  criterion: CriterionId;
+  quote: string;
+}
+
+export interface ThemeView {
+  id: string;
+  runId: string;
+  competitor: string;
+  title: string;
+  summary: string;
+  quotes: ThemeQuote[];
+  members: Array<{ signalId: string; leadId: string | null }>;
+  sampleData: boolean;
 }
 
 export interface RunSourceView {

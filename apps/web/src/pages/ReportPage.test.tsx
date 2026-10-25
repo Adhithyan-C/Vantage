@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import type { LeadView, ReportView } from '@vantage/shared';
+import type { LeadView, ReportView, ThemeView } from '@vantage/shared';
 import { ReportContent } from './ReportPage';
 
 const ranked: LeadView = {
@@ -59,6 +59,22 @@ function report(signals: LeadView[] = [ranked, other], sampleData = false): Repo
 }
 
 describe('report page rendering', () => {
+  const theme: ThemeView = { id: 'theme', runId: '00000000-0000-0000-0000-000000000001', competitor: 'Acme', title: 'Acme: slow search', summary: '3 signals', quotes: [], members: [], sampleData: false };
+
+  it('places competitor themes between ranked and other signals and hides an empty section', () => {
+    const html = renderToString(<ReportContent report={report()} themes={[theme]} />);
+    expect(html.indexOf('Ranked signals')).toBeLessThan(html.indexOf('Competitor themes'));
+    expect(html.indexOf('Competitor themes')).toBeLessThan(html.indexOf('Other signals'));
+    expect(html).toContain('Acme: slow search');
+    expect(renderToString(<ReportContent report={report()} themes={[]} />)).not.toContain('Competitor themes');
+  });
+
+  it('keeps a theme loading error inline while rendering the rest of the report', () => {
+    const html = renderToString(<ReportContent report={report()} themesError="Themes unavailable" retryThemes={() => {}} />);
+    expect(html).toContain('Themes unavailable');
+    expect(html).toContain('Ranked signals');
+    expect(html).toContain('Other signals');
+  });
   it('shows the sample data banner only when the report includes sample data', () => {
     const withSample = renderToString(<ReportContent report={report([ranked, other], true)} />);
     const liveOnly = renderToString(<ReportContent report={report([ranked], false)} />);

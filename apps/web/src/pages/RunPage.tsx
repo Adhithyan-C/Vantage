@@ -89,6 +89,7 @@ export function RunPage({ runId }: { runId: string }) {
           ) : (
             <p className="report-actions">
               <a className="btn btn-primary" href={`#/runs/${encodeURIComponent(run.id)}/signals`}>View signals</a>
+              <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/themes`}>View themes</a>
               <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>View report</a>
             </p>
           )}

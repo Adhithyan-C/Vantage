@@ -4,10 +4,11 @@ import { SetupPage } from '../pages/SetupPage';
 import { InboxPage } from '../pages/InboxPage';
 import { SignalDetailPage } from '../pages/SignalDetailPage';
 import { ReportPage } from '../pages/ReportPage';
+import { ThemesPage } from '../pages/ThemesPage';
 import { DemoBanner } from '../components/DemoBanner';
 import { useRoute } from './routes';
 
-type NavigationIcon = 'search' | 'run' | 'signals' | 'report';
+type NavigationIcon = 'search' | 'run' | 'signals' | 'report' | 'themes';
 
 function NavigationGlyph({ name }: { name: NavigationIcon }) {
   const paths: Record<NavigationIcon, string> = {
@@ -15,6 +16,7 @@ function NavigationGlyph({ name }: { name: NavigationIcon }) {
     run: 'M5 4.5v15l14-7.5-14-7.5Z',
     signals: 'M4 19V5m0 14h16M8 15l3-4 3 2 5-7',
     report: 'M6 3h9l4 4v14H6zM14 3v5h5M9 12h7M9 16h7',
+    themes: 'M4 5h6v6H4zM14 5h6v6h-6zM9 14h6v6H9zM10 8h4M7 11v3h5',
   };
   return (
     <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
@@ -29,7 +31,7 @@ export function App() {
   const currentPage = route.name === 'setup' ? 'New search'
     : route.name === 'run' ? 'Run overview'
       : route.name === 'signals' || route.name === 'signal' ? 'Signal inbox'
-        : route.name === 'report' ? 'Report' : 'Page not found';
+        : route.name === 'report' ? 'Report' : route.name === 'themes' ? 'Competitor themes' : 'Page not found';
   const runPath = currentRunId ? `/runs/${encodeURIComponent(currentRunId)}` : null;
   const navItem = (label: string, icon: NavigationIcon, href: string, active: boolean) => (
     <a className={`sidebar-link${active ? ' is-active' : ''}`} href={href} aria-label={label} title={label} aria-current={active ? 'page' : undefined}>
@@ -54,6 +56,7 @@ export function App() {
               {navItem('Run overview', 'run', `#${runPath}`, route.name === 'run')}
               {navItem('Signal inbox', 'signals', `#${runPath}/signals`, route.name === 'signals' || route.name === 'signal')}
               {navItem('Report', 'report', `#${runPath}/report`, route.name === 'report')}
+              {navItem('Competitor themes', 'themes', `#${runPath}/themes`, route.name === 'themes')}
             </>}
           </nav>
           <div className="sidebar-footnote">
@@ -76,6 +79,7 @@ export function App() {
                 <SignalDetailPage key={route.leadId} runId={route.runId} leadId={route.leadId} />
               )}
               {route.name === 'report' && <ReportPage key={route.runId} runId={route.runId} />}
+              {route.name === 'themes' && <ThemesPage key={route.runId} runId={route.runId} />}
               {route.name === 'not-found' && (
                 <EmptyState
                   title="Page not found"

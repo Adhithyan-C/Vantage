@@ -30,6 +30,7 @@ const detail: LeadDetail = {
   evidence: [{ criterion: 'asks_for_recommendation', quote: 'asks for a tool', start: 12, end: 27 }],
   discardedQuotes: 0,
   trace: { model: 'test-model', promptVersion: 'classifier.v2', createdAt: '2026-10-01T00:00:00Z', status: 'ok', output: {} },
+  criticTrace: null,
 };
 
 function fakeStore(overrides: Partial<LeadStore> = {}): LeadStore & { calls: string[]; status: string | null; feedback: FeedbackAction[] } {

@@ -150,6 +150,152 @@ function recordingAdapter(id: SourceId, searched: SourceId[]): SourceAdapter {
 }
 
 describe('runPipeline', () => {
+  const displacementDeps = (store: FakeStore, displace: NonNullable<PipelineDeps['displace']>): PipelineDeps => ({
+    store,
+    adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })],
+    ctx,
+    classify: async () => ({
+      total: 1, classified: 1, reused: 0, failed: 0,
+      labels: { buyer_intent: 0, competitor_complaint: 1, venting: 0, noise: 0 },
+      verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+    }),
+    score: async () => ({ scored: 1, ranked: 1, topScore: 80 }),
+    displace,
+  });
+
+  it('emits displacement progress and info for created themes after scoring', async () => {
+    const store = new FakeStore();
+    const deps = displacementDeps(store, async () => ({ complaintSignals: 3, competitors: 1, skippedCompetitors: [], themeCount: 1 }));
+    await runPipeline(deps, RUN_ID, params);
+    const events = store.events.filter((event) => event.agent === 'displacement');
+    expect(events.map((event) => [event.kind, event.message])).toEqual([
+      ['progress', 'Clustering competitor complaints'],
+      ['info', 'Found 1 theme(s) from 3 complaint signal(s)'],
+    ]);
+    expect(events[1]?.counts).toEqual({ complaintSignals: 3, competitors: 1, skipped: 0, themeCount: 1 });
+    expect(store.statusCalls.at(-1)?.status).toBe('completed');
+  });
+
+  it('emits the no-complaints info branch', async () => {
+    const store = new FakeStore();
+    const deps = displacementDeps(store, async () => ({ complaintSignals: 0, competitors: 0, skippedCompetitors: [], themeCount: 0 }));
+    await runPipeline(deps, RUN_ID, params);
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'displacement', kind: 'info', message: 'No competitor complaint signals to cluster' }));
+  });
+
+  it('warns when complaint signals did not form a theme', async () => {
+    const store = new FakeStore();
+    const deps = displacementDeps(store, async () => ({ complaintSignals: 2, competitors: 0, skippedCompetitors: ['Zendesk'], themeCount: 0 }));
+    await runPipeline(deps, RUN_ID, params);
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'displacement', kind: 'warning', message: 'No competitor themes found (2 complaint signal(s); at least 3 per competitor are needed)' }));
+  });
+
+  it('catches displacement errors and marks a successful-source run with warnings', async () => {
+    const store = new FakeStore();
+    const deps = displacementDeps(store, async () => { throw new Error('embedder failed'); });
+    await runPipeline(deps, RUN_ID, params);
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'displacement', kind: 'error', message: 'Displacement failed: embedder failed' }));
+    expect(store.statusCalls.at(-1)?.status).toBe('completed_with_warnings');
+  });
+
+  it('skips displacement when disabled', async () => {
+    const store = new FakeStore();
+    const displace = vi.fn(async () => ({ complaintSignals: 0, competitors: 0, skippedCompetitors: [], themeCount: 0 }));
+    const deps = { ...displacementDeps(store, displace), enableDisplacement: false };
+    await runPipeline(deps, RUN_ID, params);
+    expect(displace).not.toHaveBeenCalled();
+    expect(store.events.some((event) => event.agent === 'displacement')).toBe(false);
+  });
+
+  it('runs the critic after classification and before scoring, then emits review events', async () => {
+    const store = new FakeStore();
+    const deps: PipelineDeps = {
+      store,
+      adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })],
+      ctx,
+      classify: async () => ({
+        total: 1, classified: 1, reused: 0, failed: 0,
+        labels: { buyer_intent: 1, competitor_complaint: 0, venting: 0, noise: 0 },
+        verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+      }),
+      critic: async () => ({ reviewed: 1, failed: 0 }),
+      score: async () => ({ scored: 1, ranked: 1, topScore: 80 }),
+    };
+
+    await runPipeline(deps, RUN_ID, params);
+
+    const classifierIndex = store.events.findIndex((event) => event.agent === 'classifier' && event.kind === 'info');
+    const criticIndex = store.events.findIndex((event) => event.agent === 'critic' && event.kind === 'progress');
+    const enricherIndex = store.events.findIndex((event) => event.agent === 'enricher' && event.kind === 'progress');
+    expect(classifierIndex).toBeLessThan(criticIndex);
+    expect(criticIndex).toBeLessThan(enricherIndex);
+    expect(store.events.filter((event) => event.agent === 'critic')).toEqual([
+      { agent: 'critic', kind: 'progress', message: 'Reviewing 1 signal(s)', counts: { total: 1 } },
+      { agent: 'critic', kind: 'info', message: 'Reviewed 1 signal(s)', counts: { reviewed: 1, failed: 0 } },
+    ]);
+    expect(store.statusCalls.at(-1)?.status).toBe('completed');
+  });
+
+  it('warns and degrades run status when critic reviews fail or throw', async () => {
+    const failedStore = new FakeStore();
+    const base: PipelineDeps = {
+      store: failedStore,
+      adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })],
+      ctx,
+      classify: async () => ({
+        total: 1, classified: 1, reused: 0, failed: 0,
+        labels: { buyer_intent: 1, competitor_complaint: 0, venting: 0, noise: 0 },
+        verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+      }),
+      critic: async () => ({ reviewed: 0, failed: 1 }),
+    };
+    await runPipeline(base, RUN_ID, params);
+    expect(failedStore.events).toContainEqual({
+      agent: 'critic', kind: 'warning', message: '1 review(s) could not be completed',
+    });
+    expect(failedStore.statusCalls.at(-1)?.status).toBe('completed_with_warnings');
+
+    const thrownStore = new FakeStore();
+    await runPipeline({
+      ...base,
+      store: thrownStore,
+      critic: async () => { throw new Error('critic unavailable'); },
+    }, RUN_ID, params);
+    expect(thrownStore.events).toContainEqual({
+      agent: 'critic', kind: 'error', message: 'Critic review failed: critic unavailable',
+    });
+    expect(thrownStore.statusCalls.at(-1)?.status).toBe('completed_with_warnings');
+  });
+
+  it('skips critic when disabled or classification has no successful decisions', async () => {
+    for (const overrides of [
+      { enableCritic: false },
+      { classify: async () => ({
+        total: 1, classified: 0, reused: 0, failed: 1,
+        labels: { buyer_intent: 0, competitor_complaint: 0, venting: 0, noise: 0 },
+        verifiedQuotes: 0, droppedQuotes: 0, capped: false, failureReasons: {},
+      }) },
+    ]) {
+      const store = new FakeStore();
+      let called = false;
+      const deps: PipelineDeps = {
+        store,
+        adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })],
+        ctx,
+        classify: async () => ({
+          total: 1, classified: 1, reused: 0, failed: 0,
+          labels: { buyer_intent: 1, competitor_complaint: 0, venting: 0, noise: 0 },
+          verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+        }),
+        critic: async () => { called = true; return { reviewed: 1, failed: 0 }; },
+        ...overrides,
+      };
+      await runPipeline(deps, RUN_ID, params);
+      expect(called).toBe(false);
+      expect(store.events.some((event) => event.agent === 'critic')).toBe(false);
+    }
+  });
+
   it('excludes the snapshot adapter when source selection is omitted', async () => {
     const store = new FakeStore();
     const searched: SourceId[] = [];

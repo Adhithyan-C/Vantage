@@ -1,0 +1,12 @@
+export const EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2';
+export const EMBEDDING_DTYPE = 'q8';
+export const MODEL_CACHE_DIR = '.cache/transformers';
+export const EMBED_BATCH_SIZE = 16;
+export const MAX_EMBED_CHARS = 1000;
+export const DBSCAN_EPS = 0.45;
+export const DBSCAN_MIN_PTS = 2;
+export const MIN_SIGNALS_PER_COMPETITOR = 3;
+export const MAX_TERMS_PER_THEME = 6;
+export const TITLE_TERMS = 3;
+export const STAGE_TIMEOUT_MS = 120000;
+export const THEME_STOPWORDS = ['the','and','for','that','this','with','have','from','they','will','would','there','their','what','about','which','when','your','been','were','more','than','just','like','also','into','only','very','much','some','them','then','these','those','such','because','being','does','doing','dont','cant','its','are','was','but','not','you','our','out','can','get','got','all','any','has','had','how','why','who','use','using','used','one','too','still','even','really','thing','things','way','make','makes','don','isn','doesn','didn','wasn','won'];

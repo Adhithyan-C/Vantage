@@ -1,7 +1,9 @@
 import type { FeedbackAction, LeadDetail, LeadView, RunParams, RunView } from '@vantage/shared';
+import type { ThemeView } from '@vantage/shared';
 import type { LeadStore } from '../db/leads';
 import type { RunStore } from '../db/runs';
 import type { DemoRun } from './schema';
+import type { ThemeStore } from '../db/themes';
 
 interface ReplayOptions {
   fixture: DemoRun;
@@ -12,6 +14,7 @@ interface ReplayOptions {
 export function createReplay({ fixture, now = Date.now, maxTotalMs = 30_000 }: ReplayOptions): {
   runStore: RunStore;
   leadStore: LeadStore;
+  themeStore: ThemeStore;
 } {
   const totalMs = Math.max(...fixture.events.map((event) => event.offsetMs), 0) + 1500;
   const scale = totalMs > maxTotalMs ? maxTotalMs / totalMs : 1;
@@ -115,5 +118,18 @@ export function createReplay({ fixture, now = Date.now, maxTotalMs = 30_000 }: R
       if (originalLead(leadId)) statuses.set(leadId, status);
     },
   };
-  return { runStore, leadStore };
+  const themeStore: ThemeStore = {
+    async getThemeInputs() { throw new Error('Not available in demo mode'); },
+    async saveThemes() { throw new Error('Not available in demo mode'); },
+    async listThemes(runId) {
+      if (runId !== fixture.run.id) return [];
+      const elapsed = replayStart === null ? totalMs * scale : Math.max(0, now() - replayStart);
+      const displacementVisible = fixture.events.some((event) =>
+        event.agent === 'displacement' && event.offsetMs * scale <= elapsed,
+      );
+      const finished = elapsed >= totalMs * scale;
+      return displacementVisible || finished ? fixture.themes : [];
+    },
+  };
+  return { runStore, leadStore, themeStore };
 }

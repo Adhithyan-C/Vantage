@@ -75,7 +75,10 @@ export function InboxPage({ runId }: { runId: string }) {
           <h1 className="page-title" id="inbox-title">{run.seller.productName}</h1>
           <p className="muted">{counts.buying} buying signals · {counts.other} other signals</p>
         </div>
-        <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>Open report</a>
+        <div className="report-actions">
+          {run.status !== 'running' && run.signalCount > 0 && <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/themes`}>View themes</a>}
+          <a className="btn btn-secondary" href={`#/runs/${encodeURIComponent(run.id)}/report`}>Open report</a>
+        </div>
       </section>
       <section className="card filter-panel" aria-label="Signal filters">
         <div className="field-row">

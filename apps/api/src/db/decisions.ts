@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { CRITERION_IDS } from '@vantage/shared';
+import { ClassifierOutputSchema, CRITERION_IDS } from '@vantage/shared';
 import type {
   ClassifierOutput,
   DecisionView,
@@ -26,7 +26,7 @@ export interface RunClassificationContext {
 export interface DecisionRow {
   runId: string;
   signalId: string;
-  agent: 'classifier';
+  agent: 'classifier' | 'critic';
   model: string | null;
   promptVersion: string;
   inputHash: string;
@@ -34,6 +34,13 @@ export interface DecisionRow {
   evidence: Array<{ criterion: string; quote: string }>;
   evidenceVerified: boolean;
   status: 'ok' | 'invalid_output' | 'error';
+}
+
+export interface CriticCandidate {
+  decisionId: string;
+  signalId: string;
+  output: ClassifierOutput;
+  text: string;
 }
 
 export interface ReusableDecision {
@@ -46,6 +53,7 @@ export interface ReusableDecision {
 
 export interface DecisionStore {
   getRunContext(runId: string): Promise<RunClassificationContext>;
+  listCriticCandidates(runId: string): Promise<CriticCandidate[]>;
   findReusable(inputHash: string): Promise<ReusableDecision | null>;
   saveDecision(row: DecisionRow): Promise<void>;
   listDecisions(runId: string): Promise<DecisionView[]>;
@@ -193,6 +201,56 @@ export function createDecisionStore(db: SupabaseClient): DecisionStore {
           : [],
         evidenceVerified: data.evidence_verified === true,
       };
+    },
+
+    async listCriticCandidates(runId) {
+      const { data: decisions, error: decisionsError } = await db
+        .from('decisions')
+        .select('id, signal_id, output, created_at')
+        .eq('run_id', runId)
+        .eq('agent', 'classifier')
+        .eq('status', 'ok')
+        .order('created_at', { ascending: false });
+      if (decisionsError) {
+        throw dbError('listCriticCandidates', decisionsError);
+      }
+      const latestBySignal = new Map<string, Record<string, unknown>>();
+      for (const decision of decisions ?? []) {
+        const signalId = decision.signal_id as string;
+        if (!latestBySignal.has(signalId)) {
+          latestBySignal.set(signalId, decision);
+        }
+      }
+      const rows = [...latestBySignal.values()];
+      if (rows.length === 0) {
+        return [];
+      }
+      const signalIds = rows.map((decision) => decision.signal_id as string);
+      const { data: signals, error: signalsError } = await db
+        .from('signals')
+        .select('id, text_snapshot')
+        .in('id', signalIds);
+      if (signalsError) {
+        throw dbError('listCriticCandidates', signalsError);
+      }
+      const textBySignal = new Map((signals ?? []).map((signal) => [
+        signal.id as string,
+        signal.text_snapshot as string,
+      ]));
+      return rows.flatMap((decision) => {
+        const signalId = decision.signal_id as string;
+        const text = textBySignal.get(signalId);
+        const output = ClassifierOutputSchema.safeParse(decision.output);
+        if (typeof decision.id !== 'string' || text === undefined || !output.success) {
+          return [];
+        }
+        return [{
+          decisionId: decision.id,
+          signalId,
+          output: output.data,
+          text,
+        }];
+      });
     },
 
     async saveDecision(row) {

@@ -359,18 +359,33 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
       if (signalError) {
         throw dbError('getLeadDetail', signalError);
       }
-      const { data: decision, error: decisionError } = await db
-        .from('decisions')
-        .select('model, prompt_version, created_at, status, output')
-        .eq('run_id', lead.run_id)
-        .eq('signal_id', lead.signal_id)
-        .eq('agent', 'classifier')
-        .eq('status', 'ok')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const [{ data: decision, error: decisionError }, { data: criticDecision, error: criticError }] =
+        await Promise.all([
+          db
+            .from('decisions')
+            .select('model, prompt_version, created_at, status, output')
+            .eq('run_id', lead.run_id)
+            .eq('signal_id', lead.signal_id)
+            .eq('agent', 'classifier')
+            .eq('status', 'ok')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+          db
+            .from('decisions')
+            .select('model, prompt_version, created_at, status, output')
+            .eq('run_id', lead.run_id)
+            .eq('signal_id', lead.signal_id)
+            .eq('agent', 'critic')
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
       if (decisionError) {
         throw dbError('getLeadDetail', decisionError);
+      }
+      if (criticError) {
+        throw dbError('getLeadDetail', criticError);
       }
       if (!signal || !decision) {
         return null;
@@ -440,6 +455,13 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
           status: decision.status as string,
           output,
         },
+        criticTrace: criticDecision ? {
+          model: typeof criticDecision.model === 'string' ? criticDecision.model : null,
+          promptVersion: typeof criticDecision.prompt_version === 'string' ? criticDecision.prompt_version : null,
+          createdAt: typeof criticDecision.created_at === 'string' ? criticDecision.created_at : '',
+          status: typeof criticDecision.status === 'string' ? criticDecision.status : 'error',
+          output: asRecord(criticDecision.output),
+        } : null,
       };
     },
 

@@ -11,7 +11,7 @@ interface Stage {
 
 const STAGES: Stage[] = [
   { id: 'scout', name: 'Scout', description: 'Fetch, remove duplicates, store signals', built: true },
-  { id: 'displacement', name: 'Displacement', description: 'Group competitor complaints', built: false },
+  { id: 'displacement', name: 'Displacement', description: 'Group competitor complaints', built: true },
   { id: 'classifier', name: 'Classifier', description: 'Label buying intent with evidence', built: true },
   { id: 'enricher', name: 'Enricher', description: 'Add structured context', built: true },
   { id: 'scorer', name: 'Scorer', description: 'Compute the score from the evidence', built: true },
@@ -145,6 +145,27 @@ export function agentSummary(events: RunEvent[], agent: 'enricher' | 'scorer'): 
     : `${count('scored')} scored · ${count('ranked')} in the ranked list`;
 }
 
+export function displacementStatus(run: RunView, events: RunEvent[]): string {
+  const stageEvents = events.filter((event) => event.agent === 'displacement');
+  if (stageEvents.length === 0) return run.status === 'running' ? 'Waiting' : 'Skipped';
+  const final = [...stageEvents].reverse().find((event) =>
+    event.message.startsWith('Found ') || event.message.startsWith('No competitor') || event.message.startsWith('Displacement failed'),
+  );
+  if (!final) return 'Running';
+  if (final.message.startsWith('Displacement failed')) return 'Failed';
+  return stageEvents.some((event) => event.kind === 'warning' || event.kind === 'error')
+    ? 'Completed with warnings' : 'Completed';
+}
+
+export function displacementSummary(events: RunEvent[]): string {
+  const finalInfo = [...events].reverse().find((event) => event.agent === 'displacement' && event.kind === 'info' &&
+    (event.message.startsWith('Found ') || event.message.startsWith('No competitor')));
+  if (!finalInfo) return '';
+  if (finalInfo.message.startsWith('No competitor')) return 'no complaints';
+  const count = finalInfo.counts?.themeCount;
+  return `${typeof count === 'number' ? count : 0} themes`;
+}
+
 export function PipelineProgress({ run, events }: { run: RunView; events: RunEvent[] }) {
   const summary = scoutSummary(events);
   const scoutBadge = scoutStatus(run, events);
@@ -154,6 +175,8 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
   const enricherBadge = agentStageStatus('enricher', 'Enriched ', run, events);
   const scorerInfo = agentSummary(events, 'scorer');
   const scorerBadge = agentStageStatus('scorer', 'Scored ', run, events);
+  const displacementBadge = displacementStatus(run, events);
+  const displacementInfo = displacementSummary(events);
 
   return (
     <section className="card" aria-labelledby="pipeline-title">
@@ -167,6 +190,7 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
               <p className="stage-name">{stage.name}</p>
               <p className="muted">{stage.description}</p>
               {stage.id === 'scout' && summary && <p className="stage-summary">{summary}</p>}
+              {stage.id === 'displacement' && displacementInfo && <p className="stage-summary">{displacementInfo}</p>}
               {stage.id === 'classifier' && classifierInfo && (
                 <p className="stage-summary">{classifierInfo}</p>
               )}
@@ -181,6 +205,8 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
               <span className="badge badge-planned">{scoutBadge}</span>
             ) : stage.id === 'classifier' ? (
               <span className="badge badge-planned">{classifierBadge}</span>
+            ) : stage.id === 'displacement' ? (
+              <span className="badge badge-planned">{displacementBadge}</span>
             ) : stage.id === 'enricher' ? (
               <span className="badge badge-planned">{enricherBadge}</span>
             ) : stage.id === 'scorer' ? (

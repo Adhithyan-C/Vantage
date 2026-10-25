@@ -33,6 +33,7 @@ function storeFor(runContext: RunClassificationContext, reusable: Awaited<Return
   const saved: DecisionRow[] = [];
   const store: DecisionStore = {
     getRunContext: async () => runContext,
+    listCriticCandidates: async () => [],
     findReusable: async () => reusable,
     saveDecision: async (row) => { saved.push(row); },
     listDecisions: async () => [],

@@ -610,6 +610,9 @@ Definition of done per step: it runs, relevant tests pass, you report exactly wh
 - D8: Final visual identity (colors, logo).
 - D9: Exact current model IDs for Gemini and Groq (verify in provider docs).
 - D10: Any additional sources.
+- D11 (adopted): Displacement is implemented with a local embedding model and density clustering instead of an LLM prompt. See section 32.
+- D12 (adopted): Run events are also offered over Server-Sent Events, in addition to the polling endpoint, which stays. See section 34.
+- D13 (adopted): The one new runtime dependency for section 32 is `@huggingface/transformers`, pinned to an exact version and verified against its official documentation before use.
 
 ---
 
@@ -1308,4 +1311,235 @@ Setup page: the Keywords hint becomes "Use 2 to 5 short, specific phrases. Long 
 ### 31.5 Files
 sources/hackernews.ts, utils/concurrency.ts (only if needed), agents/classifier.ts, orchestrator/runPipeline.ts, config/enrich.ts, config/llm.ts, web SetupPage.tsx, README.md and docs/LIMITATIONS_AND_ETHICS.md (one sentence each, Step 6), plus tests.
 
+## Phase map for sections 32 to 35
 
+| Phase | Section | Feature | Status when written |
+|---|---|---|---|
+| 9A | 32 | Displacement agent with local embeddings, Themes page | to build |
+| 9B | 33 | Critic agent (adversarial evidence review) | built, awaiting review and commit |
+| 9C | 34 | Live pipeline trace (SSE plus graph) | to build |
+| 9D | 35 | Competitor co-mention graph | to build |
+
+Run order of stages after Phase 9A: Scout, Classifier, Critic, Enricher, Scorer, Displacement. Displacement runs last because it needs labelled, scored signals. This supersedes the order shown in sections 3 and 3.1.
+
+---
+
+## 32. Phase 9A: Displacement agent with local embeddings (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 32.1 Decision and overrides
+- Section 8.2 describes Displacement as an LLM agent. It is built instead as a code-only agent: a small local text-embedding model turns each complaint post into a vector, a density clustering algorithm groups similar posts, and plain code writes the theme title and summary. Reasons: it is free, reproducible, needs no extra LLM calls, and its output can be checked by anyone.
+- No LLM calls. No migration: the existing `themes` table (section 6.1) is used exactly as defined. Theme titles and summaries are produced by code and never by a model.
+- Overrides: (a) the sentence "Do not add GPU or self-hosted model code" in section 4 becomes "CPU-only local embedding inference for the Displacement agent is allowed; no GPU code". (b) The lazily loaded embedding model is a performance cache and does not affect results, so it does not violate section 2 rule 9. (c) `llm/prompts/displacement.v1.ts` from section 5 is NOT created. (d) Section 8.2's rule stays: a theme with no verified quotes is discarded.
+- One new dependency: `@huggingface/transformers`, added to `apps/api/package.json` only, pinned to an exact version (no ^ or ~). No other package is added. DBSCAN is written in this repo (32.5).
+- Honesty note for docs and UI: the first call downloads the model files (about 25 MB for the quantized model) from the Hugging Face Hub and caches them on disk. After that it runs offline. This is the only network access this agent ever makes, and tests never trigger it.
+
+### 32.2 Verify before coding
+Check the OFFICIAL Transformers.js documentation and the installed package types for: the `pipeline('feature-extraction', modelId, options)` call, the `dtype` option (expected value 'q8'), the call options `{ pooling: 'mean', normalize: true }`, converting the output tensor to a plain `number[][]`, and the `env.cacheDir` setting. If anything differs from this section, STOP and report the difference before coding.
+
+### 32.3 Config (apps/api/src/config/displacement.ts, new file)
+Exports: EMBEDDING_MODEL = 'Xenova/all-MiniLM-L6-v2'; EMBEDDING_DTYPE = 'q8'; MODEL_CACHE_DIR = '.cache/transformers' (relative to the repo root); EMBED_BATCH_SIZE = 16; MAX_EMBED_CHARS = 1000; DBSCAN_EPS = 0.45 (cosine distance); DBSCAN_MIN_PTS = 2 (counts the point itself); MIN_SIGNALS_PER_COMPETITOR = 3; MAX_TERMS_PER_THEME = 6; TITLE_TERMS = 3; STAGE_TIMEOUT_MS = 120000; THEME_STOPWORDS = ['the','and','for','that','this','with','have','from','they','will','would','there','their','what','about','which','when','your','been','were','more','than','just','like','also','into','only','very','much','some','them','then','these','those','such','because','being','does','doing','dont','cant','its','are','was','but','not','you','our','out','can','get','got','all','any','has','had','how','why','who','use','using','used','one','too','still','even','really','thing','things','way','make','makes','don','isn','doesn','didn','wasn','won']. The eps and minPts defaults were chosen before measurement; only the human tunes them.
+- `.env.example` and `config/env.ts` gain optional `ENABLE_DISPLACEMENT` (literal 'true' or 'false', default true), parsed exactly like `ENABLE_CRITIC` in section 33.
+- `.gitignore` gains the line `.cache/`.
+
+### 32.4 Embedding (apps/api/src/agents/displacement.ts, new file)
+`embedTexts(texts: string[]): Promise<number[][]>`:
+- Lazily creates the feature-extraction pipeline on the first call (module-level promise, never at server startup, never in demo mode). Sets the cache directory from MODEL_CACHE_DIR before loading.
+- Cleans each text with the existing `utils/text.ts` helper, truncates to MAX_EMBED_CHARS, embeds in batches of EMBED_BATCH_SIZE with mean pooling and normalisation, and returns one unit-length vector per input, in input order. An empty input list returns [].
+- The type `Embedder = (texts: string[]) => Promise<number[][]>` is exported so tests inject a fake.
+
+### 32.5 DBSCAN (apps/api/src/utils/dbscan.ts, new file, pure)
+`dbscan(points: number[][], eps: number, minPts: number): number[]` returns one label per point: cluster ids 0, 1, 2 in order of discovery, or -1 for noise. Distance is cosine distance for unit vectors: 1 minus the dot product, clamped to the range 0 to 2. Algorithm, with no randomness:
+1. labels start as "unvisited" for every point.
+2. For i from 0 to n-1 in order: skip visited points. region(i) = every index j (including i) with distance(i, j) <= eps. If region(i) has fewer than minPts members, label i as noise and continue.
+3. Otherwise label i with the next cluster id and expand: walk a queue seeded with region(i) minus i. For each queued point q: if q is labelled noise, relabel it with the cluster id (border point) and continue; if q is already labelled, continue; otherwise label q with the cluster id, compute region(q), and if it has at least minPts members append its members to the queue.
+Same input always gives the same output.
+
+### 32.6 Clustering and theme assembly (agents/displacement.ts)
+Types (add to packages/shared/src/types.ts):
+- `ThemeQuote = { signalId: string; criterion: CriterionId; quote: string }`
+- `ThemeView = { id: string; runId: string; competitor: string; title: string; summary: string; quotes: ThemeQuote[]; members: Array<{ signalId: string; leadId: string | null }>; sampleData: boolean }`
+
+`ThemeInput = { signalId: string; source: SourceId; text: string; competitorsMentioned: string[]; evidence: Array<{ criterion: CriterionId; quote: string }> }` (API-internal type in db/themes.ts).
+`ThemeDraft = { competitor: string; title: string; summary: string; signalIds: string[]; quotes: ThemeQuote[] }`.
+
+`buildThemeDrafts(inputs: ThemeInput[], embed: Embedder): Promise<{ drafts: ThemeDraft[]; complaintSignals: number; competitors: number; skippedCompetitors: string[] }>`:
+1. complaintSignals = inputs.length. Sort inputs by signalId ascending (deterministic, independent of rank).
+2. Primary competitor of a signal = the first entry of competitorsMentioned. Signals with an empty list are ignored (they count in complaintSignals only).
+3. Group by primary competitor, keeping the competitor spelling from the seller profile. A group smaller than MIN_SIGNALS_PER_COMPETITOR is skipped and its competitor name is added to skippedCompetitors. `competitors` = number of groups that were clustered.
+4. For each group: embed the texts, run `dbscan(vectors, DBSCAN_EPS, DBSCAN_MIN_PTS)`. Noise points join no theme.
+5. For each cluster build a draft:
+   - quotes: for each member in signalId order, the evidence entry with criterion 'names_competitor' if present, else the first evidence entry; members without any evidence contribute no quote. If a cluster ends with zero quotes it is discarded.
+   - terms: tokenise each member text as lowercase, apostrophes removed, matching /[a-z][a-z0-9]{2,}/g, dropping THEME_STOPWORDS and the words of every competitor name in the run. memberDf = number of member texts containing the term; keep terms with memberDf >= 2. groupDf = number of texts in the whole competitor group containing the term. idf = ln((groupSize + 1) / (groupDf + 1)) + 1. score = memberDf * idf. Sort by score descending then term ascending and keep MAX_TERMS_PER_THEME.
+   - title = `${competitor}: ${first TITLE_TERMS terms joined with ", "}`; with no terms the title is `${competitor}: shared complaint`.
+   - summary = `${memberCount} signal(s) complaining about ${competitor}` followed by `, mentioning: ${terms joined with ", "}.` when there are terms, or `.` when there are none.
+   - signalIds = member ids sorted ascending.
+6. drafts are ordered by member count descending, then competitor, then title.
+The TF and term functions are exported pure functions.
+
+### 32.7 Theme store (apps/api/src/db/themes.ts, new file)
+```ts
+export interface ThemeStore {
+  getThemeInputs(runId: string): Promise<ThemeInput[]>;
+  saveThemes(runId: string, drafts: ThemeDraft[]): Promise<void>;
+  listThemes(runId: string): Promise<ThemeView[]>;
+}
+```
+`createThemeStore(db: SupabaseClient): ThemeStore`:
+- getThemeInputs: leads of the run with label 'competitor_complaint'; for each, signals.text_snapshot and signals.source; competitorsMentioned from leads.score_breakdown.enrichment.competitorsMentioned (empty array if missing); evidence from the classifier decision of THIS run and signal with status 'ok' (agent 'classifier'), taking the criteria with passed true and a non-null quote.
+- saveThemes: delete the existing themes rows of the run, then insert one row per draft (run_id, competitor, title, summary, signal_ids, quotes). An empty list only deletes.
+- listThemes: read the run's themes, join leads (run_id and signal_id) to resolve each member's leadId (null if no lead), join signals to set sampleData true when any member's source is 'snapshot'. Order by member count descending, then competitor, then title.
+- Supabase errors throw `new Error(\`Supabase error in <method>: ${error.message}\`)`.
+
+### 32.8 Stage and pipeline (agents/displacement.ts, orchestrator/runPipeline.ts, index.ts)
+- `createDisplaceStage({ store, embed, config? })` returns `DisplaceStage = (runId: string) => Promise<DisplaceSummary>` with `DisplaceSummary = { complaintSignals: number; competitors: number; skippedCompetitors: string[]; themeCount: number }`. It calls getThemeInputs, buildThemeDrafts, saveThemes, and enforces STAGE_TIMEOUT_MS with Promise.race (a timeout throws `new Error('Displacement timed out')`).
+- PipelineDeps gains optional `displace?: DisplaceStage`, `enableDisplacement?: boolean` and `themes?: ThemeStore`. Without them behaviour is exactly as before; all existing tests pass unchanged.
+- It runs only when `deps.displace` exists, `enableDisplacement !== false`, and scoring produced `scored > 0`, after the scorer events and before the final status. Events (agent 'displacement'): progress `Clustering competitor complaints`; then, after the stage, one of: info `Found ${themeCount} theme(s) from ${complaintSignals} complaint signal(s)` with counts { complaintSignals, competitors, skipped: skippedCompetitors.length, themeCount } when themeCount > 0; info `No competitor complaint signals to cluster` with counts { complaintSignals: 0 } when complaintSignals is 0; warning `No competitor themes found (${complaintSignals} complaint signal(s); at least ${MIN_SIGNALS_PER_COMPETITOR} per competitor are needed)` with the same counts when themeCount is 0 and complaintSignals > 0.
+- If the stage throws: displacement error `Displacement failed: ${message}` (message via instanceof Error), continue. A run that would be 'completed' becomes 'completed_with_warnings' only when the stage threw.
+- index.ts builds the theme store and the stage (embedder = `embedTexts`) unless DEMO_MODE; if creation fails the server still starts and runs complete without Displacement. `'displacement'` already exists in AGENTS (section 11.3); if it is missing, append it at the end.
+
+### 32.9 API and demo
+- `GET /runs/:runId/themes`: same runId validation and error bodies as the other routes; 404 { error: 'Run not found' } when the run does not exist; 200 { themes: ThemeView[] } (empty array when no theme store is configured).
+- DemoRunSchema (demo/schema.ts) gains an optional `themes` array (default []) of ThemeView-shaped objects, so the existing fixtures/demo-run.json stays valid. `scripts/demo-record.ts` reads `listThemes` and stores them. `demo/replay.ts` provides a theme store whose `listThemes` serves the fixture themes once any displacement event is visible (or when the run is finished); its `getThemeInputs` and `saveThemes` throw `new Error('Not available in demo mode')`. In demo mode `index.ts` passes this store as `themes`. Do not edit fixtures/demo-run.json (the human re-records it).
+
+### 32.10 Diagnostic script
+`apps/api/src/scripts/embed-check.ts`, npm script `embed:check` in `apps/api/package.json` and root `package.json` (script entries only, same style as `llm:check`). It calls `embedTexts` once with four fixed sentences (two similar complaints about slow ticket search, one about unrelated pricing, one about unrelated billing), prints the model id, dtype, vector length (384 expected), the cosine similarity of the similar pair and of one unrelated pair, and the load time in ms. Exit 1 on any error. It may download the model on first use; say so in its output. Print nothing else.
+
+### 32.11 Web
+- `components/ThemeCard.tsx`: competitor name, title, summary, member count ("N signals"), up to three evidence quotes with the criterion name, each linking to the member's signal detail page when its leadId is not null, a "Sample data" badge when sampleData is true. Under the list: "Theme labels are keyword summaries computed by code from local text embeddings. They are not written by an AI model and are not proof of intent."
+- `pages/ThemesPage.tsx` and route `{ name: 'themes', runId }` for `#/runs/<uuid>/themes` (parseHash stays pure and tested). States: loading, ErrorState with retry, EmptyState "No competitor themes in this run" with the sentence "Themes need at least 3 complaint signals about the same competitor." A "View themes" button appears next to "View signals" on RunPage and on the Inbox header once the run is finished with signals.
+- `ReportPage`: new section "Competitor themes" between "Ranked signals" and "Other signals", using ThemeCard. If loading themes fails, show an inline ErrorState inside that section only; the rest of the report still renders. Hidden entirely when the list is empty.
+- `lib/api.ts`: getThemes(runId).
+- `PipelineProgress`: the Displacement stage becomes live with the same badge rules as the Classifier. The final event is one whose message starts with "Found ", "No competitor" or "Displacement failed". Summary line from the final info event: "N themes".
+
+### 32.12 Tests
+Offline only. Never load the real model: inject a fake `Embedder`.
+- dbscan: hand-built unit vectors with known neighbourhoods; asserts exact labels for a two-cluster case, a noise point, a border point, minPts counting the point itself, and determinism (same input twice).
+- term scoring and title/summary strings against fixed texts with exact expected output.
+- buildThemeDrafts with a fake embedder returning fixed vectors: grouping by primary competitor, skipping a group of two, discarding a cluster with no quotes, ignoring a signal with no competitor.
+- theme store with a fake Supabase client or fake store as the existing store tests do: delete-then-insert, ordering, leadId and sampleData resolution.
+- runPipeline: stage absent (unchanged), stage present with each event branch, stage throws (error event, status completed_with_warnings), `enableDisplacement: false`.
+- route tests for GET /runs/:runId/themes (400, 404, 200 empty, 200 with themes); demo schema accepts a fixture without `themes`; ThemeCard, ThemesPage states, parseHash for the new route.
+
+### 32.13 Files
+`config/displacement.ts`, `config/env.ts`, `.env.example`, `.gitignore`, `utils/dbscan.ts`, `agents/displacement.ts`, `db/themes.ts`, `scripts/embed-check.ts`, `orchestrator/runPipeline.ts`, `routes/runs.ts`, `index.ts`, `demo/schema.ts`, `demo/replay.ts`, `scripts/demo-record.ts`, `apps/api/package.json` and root `package.json` (the one dependency and the `embed:check` script entries only), `packages/shared/src/types.ts`, web `app/routes.tsx`, `app/App.tsx`, `lib/api.ts`, `components/ThemeCard.tsx`, `components/PipelineProgress.tsx`, `pages/ThemesPage.tsx`, `pages/ReportPage.tsx`, `pages/RunPage.tsx`, `pages/InboxPage.tsx`, `styles/tokens.css`, README.md and docs/LIMITATIONS_AND_ETHICS.md (one paragraph each, see 32.14), plus tests.
+
+### 32.14 Documentation text
+Add this paragraph to docs/LIMITATIONS_AND_ETHICS.md: "Competitor themes are produced by clustering text embeddings from a small local model. Cluster membership and the keyword labels are computed by code, not written by an AI model. Clusters can group posts that only look similar, and a theme is a prompt for a human to read the posts, not evidence of buying intent." Add to README.md: the `embed:check` command, the first-run model download, and the `ENABLE_DISPLACEMENT` setting.
+
+---
+
+## 33. Phase 9B: Critic agent, adversarial evidence review (accepted, built October 2026)
+
+This section records the accepted specification and the decisions made while building it. These rules override earlier sections where they conflict.
+
+### 33.1 Purpose and integrity rule
+After the classifier labels a signal and its quotes are verified in code, a second LLM call with a different prompt reviews that reasoning and looks for its weakest point. The result is a trust review shown next to the signal. It is a second opinion for the human reader. It NEVER changes the label, the score, the rank, the confidence value or any evidence, and the scorer never reads it.
+
+### 33.2 Provider rule (clarified)
+The critic uses the SAME `llm` client instance as the classifier, created once in `index.ts`. There is no Groq-only client, no per-call provider option and no change to provider selection in `llm/client.ts`. Provider order, retries, fallback and the circuit breaker of sections 21.3, 22.2, 22.3 and 22.8 apply unchanged.
+
+### 33.3 Specification
+- Config (config/llm.ts): `maxCriticPerRun = 15`, `criticPromptVersion = 'critic.v1'`, `enableCritic = true`, overridable by optional env `ENABLE_CRITIC` (literal 'true' or 'false', default true) in config/env.ts and `.env.example`.
+- Schema (packages/shared/src/schemas.ts): `CriticOutputSchema = z.object({ verdict: z.enum(['supported','weak','unsupported']), issues: z.array(z.string().max(200)).max(3), trustScore: z.number().min(0).max(1) })`. Type `CriticOutput`. `'critic'` is appended to AGENTS.
+- Prompt (llm/prompts/critic.v1.ts): `buildCriticPrompt({ label, rationale, criteria, text })`. Skeptical-auditor framing, not asked to reclassify. Post text is untrusted data with the same delimiter handling as classifier.v2.
+- Agent (agents/critic.ts): `createCriticStage({ llm, store, config })` returns `CriticStage = (runId) => Promise<CriticSummary>`, `CriticSummary = { reviewed: number; failed: number }`. Candidates are the run's latest valid 'ok' classifier decisions, ranked by number of passed criteria descending then signal id, capped at maxCriticPerRun. Each result is saved as a `decisions` row with agent 'critic', prompt_version 'critic.v1', input_hash of (criticPromptVersion, classifier decision id), output = CriticOutput, status 'ok'; an invalid or failed review is saved with status 'invalid_output' or 'error' and output {} and never blocks the run.
+- Pipeline: after classification and before enrichment, only when `deps.critic` exists, `deps.enableCritic !== false` and classified > 0. Events (agent 'critic'): progress `Reviewing ${n} signal(s)` counts { total: n } where n = min(classified, maxCriticPerRun); info `Reviewed ${reviewed} signal(s)` counts { reviewed, failed }; warning `${failed} review(s) could not be completed` when failed > 0; error `Critic review failed: ${message}` when the stage throws. A run that would be 'completed' becomes 'completed_with_warnings' when the stage threw or any review failed.
+- API: `GET /leads/:leadId` returns `LeadDetail.criticTrace: DecisionTrace | null` (null when no critic decision exists). No new endpoint. Classifier-only queries (reuse, decision lists) filter on agent 'classifier'.
+- Web: on the signal detail page header, next to the label, rank, score and status badges, a "Trust review" chip: "Trust review: supported", "Trust review: weak" or "Trust review: unsupported" (issues expandable for weak and unsupported), a plain "Trust review unavailable" when the critic decision failed, nothing when criticTrace is null. The detail page has no confidence wording; none was added.
+
+### 33.4 Files (as built)
+`.env.example`, `config/env.ts`, `config/llm.ts`, `db/decisions.ts`, `db/leads.ts`, `index.ts`, `orchestrator/runPipeline.ts`, `agents/critic.ts`, `llm/prompts/critic.v1.ts`, `packages/shared/src/{constants,schemas,types}.ts`, web `pages/SignalDetailPage.tsx`, plus tests.
+
+### 33.5 Known gaps (not part of this phase)
+- The Run page stage list (`PipelineProgress`) does not show a Critic stage. Section 34 shows it in the live graph.
+- Live provider behaviour was not exercised against real Groq during the build; the human checks it with one real run and the `llm:check` command.
+- Documentation text to add to docs/LIMITATIONS_AND_ETHICS.md in a later documentation task: "The trust review is a second model's opinion of the first model's reasoning. It can be wrong in both directions and never changes a signal's label or score."
+
+---
+
+## 34. Phase 9C: live pipeline trace (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 34.1 Decision
+Run events are also delivered over Server-Sent Events. The polling endpoint `GET /runs/:runId/events?after=N` (section 19.6) stays unchanged and remains the fallback. Run state and the request log keep polling every 1000 ms exactly as in sections 20.1 and 30.7; only the event feed gains a stream. No new packages. No migration. This works in demo mode too, because the stream reads the same store the polling endpoint reads.
+
+Honest note for docs: the server reads the store every `SSE_TICK_MS` milliseconds and pushes new events down one open connection; this is not a database push. The benefit is a single connection, ordered delivery and a faster progress display.
+
+### 34.2 Config (apps/api/src/config/stream.ts, new file)
+`SSE_TICK_MS = 300`, `SSE_HEARTBEAT_MS = 15000`, `SSE_MAX_MS = 600000`.
+
+### 34.3 Endpoint (apps/api/src/routes/runs.ts)
+`GET /runs/:runId/events/stream?after=N`:
+- Same runId validation as the other routes: invalid id gives 400 { error: 'Invalid run id' } and an unknown run gives 404 { error: 'Run not found' }, both as normal JSON before any stream headers. `after` is optional (default 0) and must be a non-negative integer, else 400 { error: 'Invalid after' }. A `Last-Event-ID` request header, when it is a non-negative integer, is used if larger than `after`.
+- Headers: Content-Type `text/event-stream`, Cache-Control `no-cache, no-transform`, Connection `keep-alive`, X-Accel-Buffering `no`; call `res.flushHeaders()`.
+- Each event is sent as `id: <event id>`, `event: run_event`, `data: <JSON RunEvent>` followed by a blank line.
+- Every SSE_TICK_MS: if a previous tick is still running skip this one; read `store.listEvents(runId, lastId)` and send new events in id order; then read `store.getRun(runId)`. When the run is null or its status is not 'running': read events once more and send them, then send `event: done` with `data: {"status":"<run status>"}` and end the response.
+- Every SSE_HEARTBEAT_MS write the comment line `: keepalive`. After SSE_MAX_MS end the response without a done frame (the browser reconnects with Last-Event-ID).
+- On a store error: log the message via instanceof Error, send `event: fatal` with `data: {}` and end the response (the client falls back to polling).
+- On request close, stop all timers. No timer may outlive its response.
+
+### 34.4 Client hook (apps/web/src/hooks/useRunEvents.ts)
+Keep the hook's name and return shape unchanged; RunPage must not need to know which transport is active. If the existing structure makes that impossible, STOP and ask.
+- When `EventSource` exists, open `/api/runs/<id>/events/stream?after=<last id>` and add each `run_event` frame to the same events state, ignoring ids already present. While the stream is healthy, the polling loop does not request events (it still polls the run and the request log). On `done`, close the stream and perform the same final drain as today.
+- Fall back to the existing event polling when `EventSource` is undefined, on a `fatal` frame, or after 3 consecutive errors without a received frame. Close the stream in the effect cleanup (React StrictMode runs effects twice in development).
+
+### 34.5 Stage state (apps/web/src/lib/stages.ts, new file, pure)
+`stageStatus(agent, events, runStatus): { state: 'waiting' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'skipped'; label: string; summary: string | null; durationMs: number | null }`. Labels are exactly "Waiting", "Running", "Completed", "Completed with warnings", "Failed", "Skipped". `PipelineProgress` is NOT changed by this phase and keeps its own logic.
+Stages in execution order: scout, classifier, critic, enricher, scorer, displacement. Events of agent 'orchestrator' are ignored.
+- A final event of a stage is its first event of kind 'info' or 'warning' whose message starts with the prefix in this table: classifier "Classified "; critic "Reviewed "; enricher "Enriched "; scorer "Scored "; displacement "Found ", "No competitor".
+- Generic rule for classifier, critic, enricher, scorer, displacement: (1) a final event exists: completed, or completed_with_warnings if any event of that stage has kind 'warning' or 'error'; (2) no final event but events exist: running while runStatus is 'running'; otherwise failed if any event is of kind 'error', else completed_with_warnings; (3) no events: waiting while runStatus is 'running', otherwise skipped.
+- Scout follows section 22.6: running until an event with counts.afterDedupe exists or the run is no longer running; then completed, or completed_with_warnings if any scout event with counts.status is 'degraded', 'failed' or 'skipped'; failed if every scout event that has counts.status has status 'failed'; waiting or skipped when there are no scout events (same rule as (3)).
+- summary comes from the final event counts: scout `${afterDedupe} signals`; classifier `${classified} classified`; critic `${reviewed} reviewed`; enricher `${enriched} enriched`; scorer `${ranked} ranked`; displacement `${themeCount} themes`, or `no complaints` when complaintSignals is 0. null when no final event.
+- durationMs = time from the stage's first event createdAt to its final event createdAt; null when there is no final event.
+
+### 34.6 Graph component (apps/web/src/components/PipelineGraph.tsx, new file)
+Plain SVG, no library. Six nodes in a row in the order of 34.5, each 130 wide with 24 between nodes (viewBox width 900), joined by arrows. Each node shows its name, state label, summary and duration ("3.2 s", one decimal) when known. The state is shown as text as well as colour. A running node pulses; an edge is drawn as active when its source node is completed and its target is running. All animation is disabled under `prefers-reduced-motion`. The SVG has `role="img"` and an aria-label that lists every stage with its state. The container scrolls horizontally on narrow screens (min width 900) and the existing PipelineProgress list stays as the accessible text version. Rendered on RunPage above PipelineProgress in a card titled "Live pipeline". Styles use existing variables in tokens.css.
+
+### 34.7 Tests
+- Stream route: a test server started on an ephemeral port with a fake RunStore; read the stream with fetch and assert the exact frames (`id`, `event`, `data`), `after` and `Last-Event-ID` handling, the `done` frame and that the response ends, 400 and 404 JSON bodies, a store error giving a `fatal` frame, and that timers stop after the client aborts (use the injectable clock or small intervals).
+- stages.ts: a table of events and runStatus values for every rule in 34.5 including scout edge cases and durations.
+- PipelineGraph: renders all six stages, state text, aria-label, no animation class under reduced motion (check the class or attribute the component sets).
+- Hook: with a fake EventSource, events are merged without duplicates; fallback to polling on `fatal`, on three errors, and when EventSource is undefined.
+
+### 34.8 Files
+`config/stream.ts`, `routes/runs.ts`, web `hooks/useRunEvents.ts`, `lib/stages.ts`, `components/PipelineGraph.tsx`, `pages/RunPage.tsx`, `styles/tokens.css`, plus tests.
+
+---
+
+## 35. Phase 9D: competitor co-mention graph (added October 2026)
+
+These rules override earlier sections where they conflict.
+
+### 35.1 Scope
+No LLM calls, no migration, no new packages. The graph shows which competitors are mentioned together in the run's buying signals. It uses data the Enricher already stores (`enrichment.competitorsMentioned`, section 23.3).
+
+### 35.2 Shared type
+`CompetitorGraphView = { nodes: Array<{ competitor: string; mentionCount: number }>; edges: Array<{ a: string; b: string; weight: number }>; signalCount: number; sampleData: boolean }`.
+
+### 35.3 Pure function (apps/api/src/report/competitorGraph.ts, new file)
+`buildCompetitorGraph(leads: LeadView[]): CompetitorGraphView`:
+- Only leads labelled buyer_intent or competitor_complaint are used; signalCount is their number. Other labels are ignored (vendor promotion in noise posts would distort the graph).
+- Each lead contributes its distinct `enrichment.competitorsMentioned` names. mentionCount of a competitor = number of used leads that mention it. Every competitor mentioned at least once is a node.
+- For every pair of distinct competitors in the same lead, the edge has a = the smaller name and b = the larger name by plain string comparison (`a < b`), and its weight is the number of used leads that mention both.
+- Nodes are sorted by mentionCount descending then name; edges by weight descending, then a, then b. At most 12 nodes are returned (the top 12) and only edges between returned nodes.
+- sampleData is true when any used lead has source 'snapshot'.
+
+### 35.4 Endpoint (apps/api/src/routes/report.ts)
+`GET /runs/:runId/competitor-graph`: same runId validation and error bodies; 404 { error: 'Run not found' }; 409 { error: 'Run is still running' } while the run is running; 200 { graph: CompetitorGraphView } built from `leadStore.listLeads(runId, true)`. Works in demo mode through the replay lead store.
+
+### 35.5 Layout (apps/web/src/lib/graphLayout.ts, new file, pure)
+`layoutCircle(graph, size)` returns node positions and edge widths with no randomness: node i of n sits at angle -PI/2 + 2*PI*i/n on a circle of radius 0.38 * size around the centre (size/2, size/2); node radius = 14 + 22 * (mentionCount / maxMentionCount); edge stroke width = 1 + 5 * (weight / maxWeight). All numbers rounded to one decimal. With one node the node sits at the centre. A circular layout is used on purpose: runs have at most a handful of competitors, so a force simulation would add a dependency and no information.
+
+### 35.6 Component and pages
+- `components/CompetitorGraph.tsx`: SVG of size 360 with node circles (competitor name beside each, mention count inside or beside), edge lines labelled with their weight when weight > 1, `role="img"` with an aria-label summarising the strongest pair, and a native `<details>` "Show as table" listing every pair and weight and every node count. A "Sample data" badge when sampleData is true. A caption: "Counts are signals that mention each competitor. A line means the same signal mentions both."
+- States: fewer than 2 nodes: EmptyState "Not enough competitor mentions" with the sentence "This view needs at least two competitors mentioned in buying signals."; two or more nodes but no edges: the nodes plus the sentence "No signal mentions two competitors together in this run."
+- Shown on `ThemesPage` below the themes and on `ReportPage` in a section "Competitor co-mentions" after "Competitor themes". A fetch failure shows an inline ErrorState in that section only. `lib/api.ts`: getCompetitorGraph(runId).
+
+### 35.7 Tests
+`buildCompetitorGraph`: fixed leads with exact nodes, edges, ordering, the 12-node cap, label filtering, duplicate names within one lead, sampleData. `layoutCircle`: exact positions for 1, 2 and 3 nodes. Route: 400, 404, 409, 200. Component: states, table alternative, badge.
+
+### 35.8 Files
+`packages/shared/src/types.ts`, `report/competitorGraph.ts`, `routes/report.ts`, web `lib/api.ts`, `lib/graphLayout.ts`, `components/CompetitorGraph.tsx`, `pages/ThemesPage.tsx`, `pages/ReportPage.tsx`, `styles/tokens.css`, plus tests.

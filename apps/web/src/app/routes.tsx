@@ -6,12 +6,14 @@ export type Route =
   | { name: 'signals'; runId: string }
   | { name: 'signal'; runId: string; leadId: string }
   | { name: 'report'; runId: string }
+  | { name: 'themes'; runId: string }
   | { name: 'not-found' };
 
 const RUN_PATH = /^\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const SIGNALS_PATH = /^\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/signals$/i;
 const SIGNAL_PATH = /^\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/signals\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 const REPORT_PATH = /^\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/report$/i;
+const THEMES_PATH = /^\/runs\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/themes$/i;
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#/, '') || '/';
@@ -29,6 +31,10 @@ export function parseHash(hash: string): Route {
   const reportMatch = REPORT_PATH.exec(path);
   if (reportMatch?.[1]) {
     return { name: 'report', runId: reportMatch[1] };
+  }
+  const themesMatch = THEMES_PATH.exec(path);
+  if (themesMatch?.[1]) {
+    return { name: 'themes', runId: themesMatch[1] };
   }
   const match = RUN_PATH.exec(path);
   if (match && match[1]) {

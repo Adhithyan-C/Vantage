@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import type { LeadView } from '@vantage/shared';
+import type { DecisionTrace, LeadView } from '@vantage/shared';
 import { SignalCard } from './SignalCard';
 import { ScoreBreakdown } from './ScoreBreakdown';
 import { CriteriaChecklist } from './CriteriaChecklist';
-import { DiscardedQuotesNote } from '../pages/SignalDetailPage';
+import { CriticTrustReview, DiscardedQuotesNote } from '../pages/SignalDetailPage';
 import { EMPTY_FORM, buildRequest, SetupPage } from '../pages/SetupPage';
 import { SOURCE_LABEL } from '../lib/format';
 import { AppFooter } from '../app/App';
@@ -123,5 +123,25 @@ describe('Phase 6 server-rendered components', () => {
   it('shows the discarded quote note only when quote count is positive', () => {
     expect(renderToString(<DiscardedQuotesNote count={0} />)).toBe('');
     expect(renderToString(<DiscardedQuotesNote count={2} />)).toContain('quotes<!-- --> from the model could not be found');
+  });
+
+  it('shows critic verdicts as a separate trust review and expands issues for weak or unsupported results', () => {
+    const trace = (verdict: string, issues: string[] = []): DecisionTrace => ({
+      model: 'test-model',
+      promptVersion: 'critic.v1',
+      createdAt: '2026-10-01T00:00:00Z',
+      status: 'ok',
+      output: { verdict, issues, trustScore: 0.5 },
+    });
+    expect(renderToString(<CriticTrustReview trace={null} />)).toBe('');
+    expect(renderToString(<CriticTrustReview trace={trace('supported')} />)).toContain('Trust review: <!-- -->supported');
+    const weak = renderToString(<CriticTrustReview trace={trace('weak', ['The quote does not support urgency.'])} />);
+    expect(weak).toContain('Trust review: <!-- -->weak');
+    expect(weak).toContain('<details>');
+    expect(weak).toContain('The quote does not support urgency.');
+    expect(renderToString(<CriticTrustReview trace={trace('unsupported', ['The label is unsupported.'])} />))
+      .toContain('Trust review: <!-- -->unsupported');
+    expect(renderToString(<CriticTrustReview trace={{ ...trace('supported'), status: 'invalid_output', output: {} }} />))
+      .toContain('Trust review unavailable');
   });
 });

@@ -1,8 +1,15 @@
 import { describe, it, expect } from 'vitest';
-import { ClassifierOutputSchema, RawSignalSchema, SellerProfileInputSchema, RunCreateRequestSchema } from '../src';
+import { ClassifierOutputSchema, CriticOutputSchema, RawSignalSchema, SellerProfileInputSchema, RunCreateRequestSchema } from '../src';
 import seller from '../../../fixtures/seller-helpdesk.json';
 
 describe('schemas', () => {
+  it('accepts a valid critic review and rejects out-of-range or excessive output', () => {
+    expect(CriticOutputSchema.safeParse({ verdict: 'supported', issues: [], trustScore: 1 }).success).toBe(true);
+    expect(CriticOutputSchema.safeParse({ verdict: 'weak', issues: ['a'.repeat(201)], trustScore: 0.5 }).success).toBe(false);
+    expect(CriticOutputSchema.safeParse({ verdict: 'unsupported', issues: ['1', '2', '3', '4'], trustScore: 0.5 }).success).toBe(false);
+    expect(CriticOutputSchema.safeParse({ verdict: 'supported', issues: [], trustScore: 1.1 }).success).toBe(false);
+  });
+
   it('a valid ClassifierOutput passes ClassifierOutputSchema.safeParse', () => {
     const valid = {
       label: 'buyer_intent',

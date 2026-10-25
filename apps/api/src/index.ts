@@ -6,11 +6,14 @@ import { fileURLToPath } from 'node:url';
 import { getEnv } from './config/env';
 import { LLM_CONFIG } from './config/llm';
 import { createClassifyStage } from './agents/classifier';
+import { createCriticStage } from './agents/critic';
 import { createScoreStage } from './agents/scorer';
+import { createDisplaceStage, embedTexts } from './agents/displacement';
 import { createDecisionStore } from './db/decisions';
 import { createLeadStore } from './db/leads';
 import { createDb } from './db/client';
 import { createRunStore } from './db/runs';
+import { createThemeStore } from './db/themes';
 import { createLlmClient } from './llm/client';
 import { createRunsRouter } from './routes/runs';
 import { createLeadsRouter } from './routes/leads';
@@ -48,6 +51,7 @@ async function main(): Promise<void> {
       runner: async () => {},
       demoMode: true,
       leadStore: replay.leadStore,
+      themes: replay.themeStore,
     }));
     app.use(createLeadsRouter({ store: replay.leadStore }));
     app.use(createReportRouter({ runStore: replay.runStore, leadStore: replay.leadStore }));
@@ -65,6 +69,9 @@ async function main(): Promise<void> {
   let reportRouter: express.Router | undefined;
   let score: ReturnType<typeof createScoreStage> | undefined;
   let classify: ReturnType<typeof createClassifyStage> | undefined;
+  let critic: ReturnType<typeof createCriticStage> | undefined;
+  let themes: ReturnType<typeof createThemeStore> | undefined;
+  let displace: ReturnType<typeof createDisplaceStage> | undefined;
   try {
     const llm = createLlmClient({
       fetch: globalThis.fetch,
@@ -74,6 +81,7 @@ async function main(): Promise<void> {
     });
     decisionStore = createDecisionStore(db);
     classify = createClassifyStage({ llm, store: decisionStore, config: LLM_CONFIG });
+    critic = createCriticStage({ llm, store: decisionStore, config: LLM_CONFIG });
   } catch (err) {
     console.warn(`Warning: classifier is unavailable: ${errorMessage(err)}`);
   }
@@ -84,6 +92,13 @@ async function main(): Promise<void> {
     leadsRouter = createLeadsRouter({ store: leadStore });
   } catch (err) {
     console.warn(`Warning: scorer is unavailable: ${errorMessage(err)}`);
+  }
+
+  try {
+    themes = createThemeStore(db);
+    displace = createDisplaceStage({ store: themes, embed: embedTexts });
+  } catch (err) {
+    console.warn(`Warning: displacement is unavailable: ${errorMessage(err)}`);
   }
 
   try {
@@ -114,6 +129,11 @@ async function main(): Promise<void> {
       adapters: getEnabledAdapters(),
       ctx: defaultAdapterContext(),
       classify,
+      critic,
+      enableCritic: env.ENABLE_CRITIC,
+      displace,
+      enableDisplacement: env.ENABLE_DISPLACEMENT,
+      themes,
       decisionStore,
       score,
       leadStore,

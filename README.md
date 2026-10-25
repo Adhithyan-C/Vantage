@@ -65,6 +65,8 @@ Names and requiredness below come from `apps/api/src/config/env.ts`; purposes ar
 | `GROQ_API_KEY` | No | Optional Groq provider credential. |
 | `GROQ_MODEL` | No | Override the configured Groq model. |
 | `LLM_PROVIDER_ORDER` | No | Provider order; defaults to Groq then Gemini. |
+| `ENABLE_CRITIC` | No | Enables the optional second-opinion evidence review; defaults to `true`. |
+| `ENABLE_DISPLACEMENT` | No | Enables local embedding-based competitor complaint themes; defaults to `true`. |
 | `REDDIT_USER_AGENT` | Yes | Required by current environment validation; Reddit access is not implemented. |
 | `REDDIT_CLIENT_ID` | No | Reserved optional Reddit API credential; adapter not implemented. |
 | `REDDIT_CLIENT_SECRET` | No | Reserved optional Reddit API credential; adapter not implemented. |
@@ -84,7 +86,9 @@ Set `DEMO_MODE` to `true` in `.env`, then start the API and web app with `npm ru
 
 Scripts verified for this project are `npm run typecheck`, `npm test -- --reporter=verbose --no-isolate --no-file-parallelism`, and `npm run build --workspace @vantage/web`.
 
-Root scripts: `npm run dev:api`, `npm run dev:web`, `npm run typecheck`, `npm test`, `npm run scout`, `npm run demo:record`, `npm run llm:check`, and `npm run eval:sample`. Workspace scripts include API `dev`, `typecheck`, `scout`, `demo:record`, `llm:check`, and `eval:sample`; web `dev`, `build`, and `typecheck`; shared `typecheck`.
+Root scripts: `npm run dev:api`, `npm run dev:web`, `npm run typecheck`, `npm test`, `npm run scout`, `npm run demo:record`, `npm run llm:check`, `npm run embed:check`, and `npm run eval:sample`. Workspace scripts include API `dev`, `typecheck`, `scout`, `demo:record`, `llm:check`, `embed:check`, and `eval:sample`; web `dev`, `build`, and `typecheck`; shared `typecheck`.
+
+The first displacement run downloads about 25 MB of quantized model files from Hugging Face and caches them under `.cache/transformers`; later runs use the cache. Run `npm run embed:check` to inspect the local embedding setup. Set `ENABLE_DISPLACEMENT=false` to disable theme generation.
 
 See [the evaluation](docs/EVALUATION.md) for the synthetic and informal live observations.
 

@@ -79,4 +79,24 @@ describe('createReplay', () => {
     clock = 1000;
     expect(await replay.runStore.listSourceRequests(RUN_ID)).toHaveLength(1);
   });
+
+  it('reveals themes after a displacement event and disallows writes in demo mode', async () => {
+    let clock = 0;
+    const base = fixture();
+    const themed = DemoRunSchema.parse({
+      ...base,
+      events: [...base.events, {
+        id: 3, runId: RUN_ID, agent: 'displacement', kind: 'info', message: 'Found 1 theme(s)',
+        counts: { themeCount: 1 }, createdAt: '2026-10-18T10:00:03.000Z', offsetMs: 3000,
+      }],
+      themes: [{ id: 'theme-1', runId: RUN_ID, competitor: 'Acme', title: 'Acme: slow search', summary: '3 signals', quotes: [], members: [], sampleData: false }],
+    });
+    const replay = createReplay({ fixture: themed, now: () => clock });
+    await replay.runStore.createRun('seller', themed.run.params);
+    expect(await replay.themeStore.listThemes(RUN_ID)).toEqual([]);
+    clock = 3000;
+    expect(await replay.themeStore.listThemes(RUN_ID)).toEqual(themed.themes);
+    await expect(replay.themeStore.getThemeInputs(RUN_ID)).rejects.toThrow('Not available in demo mode');
+    await expect(replay.themeStore.saveThemes(RUN_ID, [])).rejects.toThrow('Not available in demo mode');
+  });
 });

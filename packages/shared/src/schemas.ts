@@ -33,6 +33,12 @@ export const ClassifierOutputSchema = z.object({
   rationale: z.string().max(280),
 });
 
+export const CriticOutputSchema = z.object({
+  verdict: z.enum(['supported', 'weak', 'unsupported']),
+  issues: z.array(z.string().max(200)).max(3),
+  trustScore: z.number().min(0).max(1),
+});
+
 export const ScoreComponentSchema = z.object({
   name: z.enum(SCORE_COMPONENT_NAMES),
   value: z.number().min(0).max(1),

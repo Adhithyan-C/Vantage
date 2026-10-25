@@ -1,4 +1,4 @@
-import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView } from '@vantage/shared';
+import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
 
 const BASE = '/api';
 
@@ -72,6 +72,11 @@ export function getRun(runId: string): Promise<RunView> {
 
 export function getReport(runId: string): Promise<ReportView> {
   return request<ReportView>(`/runs/${encodeURIComponent(runId)}/report.json`);
+}
+
+export async function getThemes(runId: string): Promise<ThemeView[]> {
+  const body = await request<{ themes: ThemeView[] }>(`/runs/${encodeURIComponent(runId)}/themes`);
+  return body.themes;
 }
 
 export async function getEvents(runId: string, after: number): Promise<RunEvent[]> {

@@ -29,10 +29,12 @@ The backend uses a Supabase service-role key. The current database policy config
 
 ## Not implemented
 
-Displacement and themes, the Reddit adapter, developer-forum adapter, review-site source, approach suggester, Monitor, authentication, broader row-level-security policies, deployment, a browser accessibility audit, and load testing are not implemented.
+The Reddit adapter, developer-forum adapter, review-site source, approach suggester, Monitor, authentication, broader row-level-security policies, deployment, a browser accessibility audit, and load testing are not implemented.
 
 ## Misuse risks and limits
 
 Scores and labels can be mistaken for certainty, and summaries can overstate evidence. The interface exposes evidence and deterministic score components so a person can inspect the basis of a result; the labels and scores should still be treated as decision support, not proof of intent. The system is limited to public posts and does not supply personal contact details or automate outreach. Synthetic records remain visibly labelled and are not linked as real posts.
+
+Competitor themes are produced by clustering text embeddings from a small local model. Cluster membership and the keyword labels are computed by code, not written by an AI model. Clusters can group posts that only look similar, and a theme is a prompt for a human to read the posts, not evidence of buying intent.
 
 Hacker News searches each keyword with separate Ask HN and story/comment requests, then combines results across keywords.

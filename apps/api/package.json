@@ -9,9 +9,11 @@
     "scout": "tsx src/scripts/scout-cli.ts",
     "demo:record": "tsx src/scripts/demo-record.ts",
     "llm:check": "tsx src/scripts/llm-check.ts",
+    "embed:check": "tsx src/scripts/embed-check.ts",
     "eval:sample": "tsx src/scripts/eval-sample.ts"
   },
   "dependencies": {
+    "@huggingface/transformers": "4.3.1",
     "@supabase/supabase-js": "2.117.2",
     "@vantage/shared": "*",
     "dotenv": "18.0.5",

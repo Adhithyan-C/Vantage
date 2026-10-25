@@ -8,3 +8,11 @@ describe('report hash route', () => {
     expect(hash).toBe('#/runs/00000000-0000-0000-0000-000000000001/report');
   });
 });
+
+describe('themes hash route', () => {
+  it('parses a themes route without changing the input hash', () => {
+    const hash = '#/runs/00000000-0000-0000-0000-000000000001/themes';
+    expect(parseHash(hash)).toEqual({ name: 'themes', runId: '00000000-0000-0000-0000-000000000001' });
+    expect(hash).toBe('#/runs/00000000-0000-0000-0000-000000000001/themes');
+  });
+});

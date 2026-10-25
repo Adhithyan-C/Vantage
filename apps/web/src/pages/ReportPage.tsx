@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { LeadView, ReportView } from '@vantage/shared';
+import type { LeadView, ReportView, ThemeView } from '@vantage/shared';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
-import { ApiError, getReport } from '../lib/api';
+import { ApiError, getReport, getThemes } from '../lib/api';
 import { LABEL_TEXT, shortId, SOURCE_LABEL, formatAge } from '../lib/format';
 import { ScoreMeter } from '../components/ScoreMeter';
 import { LoadingState } from '../components/LoadingState';
+import { ThemeCard } from '../components/ThemeCard';
 
 const CRITERION_TEXT: Record<string, string> = {
   states_problem: 'States a problem',
@@ -72,7 +73,12 @@ function RankedSignal({ signal }: { signal: LeadView }) {
   );
 }
 
-export function ReportContent({ report }: { report: ReportView }) {
+export function ReportContent({ report, themes = [], themesError, retryThemes }: {
+  report: ReportView;
+  themes?: ThemeView[];
+  themesError?: string | null;
+  retryThemes?: () => void;
+}) {
   const rankedSignals = report.signals.filter(isRanked);
   const otherSignals = report.signals.filter((signal) => !isRanked(signal));
   const sourceNames = report.run.sources.map((source) => SOURCE_LABEL[source.source]);
@@ -133,6 +139,14 @@ export function ReportContent({ report }: { report: ReportView }) {
         )}
       </section>
 
+      {(themes.length > 0 || themesError) && (
+        <section className="stack" aria-labelledby="competitor-themes-title">
+          <h2 className="card-title" id="competitor-themes-title">Competitor themes</h2>
+          {themesError ? <ErrorState title="Could not load competitor themes" message={themesError} onRetry={retryThemes} />
+            : themes.map((theme) => <ThemeCard key={theme.id} theme={theme} />)}
+        </section>
+      )}
+
       <section className="card" aria-labelledby="other-signals-title">
         <h2 className="card-title" id="other-signals-title">Other signals</h2>
         {otherSignals.length === 0 ? <p className="muted">No other signals. <a href="#ranked-signals-title">Review ranked signals</a></p> : (
@@ -171,6 +185,8 @@ export function ReportPage({ runId }: { runId: string }) {
   const [report, setReport] = useState<ReportView | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(true);
+  const [themes, setThemes] = useState<ThemeView[]>([]);
+  const [themesError, setThemesError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -183,7 +199,17 @@ export function ReportPage({ runId }: { runId: string }) {
     }
   }, [runId]);
 
+  const loadThemes = useCallback(async () => {
+    setThemesError(null);
+    try {
+      setThemes(await getThemes(runId));
+    } catch (err) {
+      setThemesError(err instanceof Error ? err.message : String(err));
+    }
+  }, [runId]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadThemes(); }, [loadThemes]);
 
   if (loading) {
     return <LoadingState label="Loading report" />;
@@ -197,5 +223,5 @@ export function ReportPage({ runId }: { runId: string }) {
   if (error) {
     return <ErrorState title="Could not load report" message={error.message} onRetry={() => void load()} />;
   }
-  return report ? <ReportContent report={report} /> : null;
+  return report ? <ReportContent report={report} themes={themes} themesError={themesError} retryThemes={() => void loadThemes()} /> : null;
 }

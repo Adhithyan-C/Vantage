@@ -3,11 +3,12 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import type { LeadDetail, LeadView, RunEvent, RunView, SourceRequestView } from '@vantage/shared';
+import type { LeadDetail, LeadView, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
 import { getEnv } from '../config/env';
 import { createDb } from '../db/client';
 import { createLeadStore } from '../db/leads';
 import { createRunStore } from '../db/runs';
+import { createThemeStore } from '../db/themes';
 import { DemoRunSchema } from '../demo/schema';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -19,6 +20,7 @@ export interface DemoFixtureInput {
   leads: LeadView[];
   details: Record<string, LeadDetail>;
   requests?: SourceRequestView[];
+  themes?: ThemeView[];
 }
 
 export function buildDemoFixture(input: DemoFixtureInput) {
@@ -37,6 +39,7 @@ export function buildDemoFixture(input: DemoFixtureInput) {
     leads: input.leads,
     details: input.details,
     requests: input.requests ?? [],
+    themes: input.themes ?? [],
   });
 }
 
@@ -55,6 +58,7 @@ async function main(): Promise<void> {
   const outPath = resolve(repoRoot, values.out ?? 'fixtures/demo-run.json');
   const db = createDb(getEnv());
   const runStore = createRunStore(db);
+  const themeStore = createThemeStore(db);
   const leadStore = createLeadStore(db);
   const run = await runStore.getRun(values.run);
   if (!run) {
@@ -85,6 +89,7 @@ async function main(): Promise<void> {
   const fixture = buildDemoFixture({
     recordedAt: new Date().toISOString(), run, events, leads, details,
     requests: await runStore.listSourceRequests(values.run),
+    themes: await themeStore.listThemes(values.run),
   });
   writeFileSync(outPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
   console.log(`Recorded ${fixture.events.length} events, ${fixture.leads.length} leads, ${Object.keys(fixture.details).length} details`);

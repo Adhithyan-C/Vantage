@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildDemoFixture } from '../src/scripts/demo-record';
 import { detail, events, fixture, lead, run, startedAt } from './demoTestFixtures';
-import type { SourceRequestView } from '@vantage/shared';
+import type { SourceRequestView, ThemeView } from '@vantage/shared';
 
 describe('buildDemoFixture', () => {
   it('sorts events, computes non-negative offsets, and labels the source run', () => {
@@ -27,5 +27,14 @@ describe('buildDemoFixture', () => {
     const source = fixture();
     const result = buildDemoFixture({ recordedAt: source.recordedAt, run, events, leads: [lead], details: { [lead.leadId]: detail }, requests: [request] });
     expect(result.requests).toEqual([request]);
+  });
+
+  it('records theme views and defaults them to an empty list', () => {
+    const source = fixture();
+    const theme: ThemeView = { id: 't', runId: run.id, competitor: 'Acme', title: 'Acme: slow', summary: '3 signals', quotes: [], members: [], sampleData: false };
+    const withTheme = buildDemoFixture({ recordedAt: source.recordedAt, run, events, leads: [lead], details: { [lead.leadId]: detail }, themes: [theme] });
+    const withoutTheme = buildDemoFixture({ recordedAt: source.recordedAt, run, events, leads: [lead], details: { [lead.leadId]: detail } });
+    expect(withTheme.themes).toEqual([theme]);
+    expect(withoutTheme.themes).toEqual([]);
   });
 });

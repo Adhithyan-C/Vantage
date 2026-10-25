@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { createElement } from 'react';
 import type { RunEvent, RunView } from '@vantage/shared';
-import { agentStageStatus, agentSummary, RunStatusBadge, scoutStatus } from './PipelineProgress';
+import { agentStageStatus, agentSummary, displacementStatus, displacementSummary, PipelineProgress, RunStatusBadge, scoutStatus } from './PipelineProgress';
+import { renderToString } from 'react-dom/server';
 
 function run(status: RunView['status'], sourceStatuses: RunView['sources'][number]['status'][] = ['ok']): RunView {
   return {
@@ -32,7 +34,7 @@ const scoutComplete: RunEvent = {
 };
 
 function stageEvent(
-  agent: 'enricher' | 'scorer',
+  agent: 'enricher' | 'scorer' | 'displacement',
   kind: RunEvent['kind'],
   message: string,
   counts: Record<string, unknown> | null = null,
@@ -119,5 +121,23 @@ describe('Enricher and Scorer pipeline stages', () => {
         topScore: 79,
       }),
     ], 'scorer')).toBe(`4 scored \u00b7 2 in the ranked list`);
+  });
+});
+
+describe('Displacement pipeline stage', () => {
+  it('shows live status and summary from the final displacement event', () => {
+    expect(displacementStatus(run('running'), [])).toBe('Waiting');
+    expect(displacementStatus(run('running'), [stageEvent('displacement', 'progress', 'Clustering competitor complaints')])).toBe('Running');
+    const final = stageEvent('displacement', 'info', 'Found 2 theme(s) from 4 complaint signal(s)', { themeCount: 2 });
+    expect(displacementStatus(run('completed'), [final])).toBe('Completed');
+    expect(displacementSummary([final])).toBe('2 themes');
+    expect(displacementSummary([stageEvent('displacement', 'info', 'No competitor complaint signals to cluster', { complaintSignals: 0 })])).toBe('no complaints');
+    expect(displacementStatus(run('completed'), [stageEvent('displacement', 'error', 'Displacement failed: offline')])).toBe('Failed');
+  });
+
+  it('renders Displacement as an active stage', () => {
+    const html = renderToString(createElement(PipelineProgress, { run: run('running'), events: [] }));
+    expect(html).toContain('Displacement');
+    expect(html).not.toContain('Planned</span>');
   });
 });

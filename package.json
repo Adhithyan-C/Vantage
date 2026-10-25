@@ -17,10 +17,16 @@
     "scout": "npm run scout --workspace @vantage/api --",
     "demo:record": "npm run demo:record --workspace @vantage/api --",
     "llm:check": "npm run llm:check --workspace @vantage/api --",
+    "embed:check": "npm run embed:check --workspace @vantage/api --",
     "eval:sample": "npm run eval:sample --workspace @vantage/api --"
   },
   "devDependencies": {
     "typescript": "7.0.2",
     "vitest": "5.0.3"
+  },
+  "allowScripts": {
+    "onnxruntime-node@1.30.0": true,
+    "esbuild@0.28.2": true,
+    "protobufjs@7.6.6": true
   }
 }

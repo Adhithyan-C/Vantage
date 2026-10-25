@@ -127,6 +127,26 @@ export function createRunsRouter(
     }
   });
 
+  router.get('/runs/:runId/themes', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const run = await store.getRun(runId);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      const themes = deps.themes ? await deps.themes.listThemes(runId) : [];
+      res.status(200).json({ themes });
+    } catch (err) {
+      console.error(`GET /runs/:runId/themes failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
   if (!deps.demoMode) router.get('/runs/:runId/decisions', async (req, res) => {
     try {
       const runId = req.params.runId;

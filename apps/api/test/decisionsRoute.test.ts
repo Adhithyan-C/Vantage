@@ -50,6 +50,7 @@ describe('GET /runs/:runId/decisions', () => {
   it('returns 400 for an invalid run id and 200 with decision views for a valid id', async () => {
     const decisionStore: DecisionStore = {
       async getRunContext() { return { seller: { productName: 'Support', problemDescription: 'Tickets', competitors: [] }, signals: [] }; },
+      async listCriticCandidates() { return []; },
       async findReusable() { return null; },
       async saveDecision() {},
       async listDecisions() { return [expectedDecision]; },
