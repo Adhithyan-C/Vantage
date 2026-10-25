@@ -8,7 +8,7 @@ import type { LlmClient, LlmResult } from '../src/llm/client';
 import { createCriticStage } from '../src/agents/critic';
 import { contentHash } from '../src/utils/hash';
 
-const config = { maxCriticPerRun: 15, criticPromptVersion: 'critic.v1' };
+const config = { maxCriticPerRun: 8, concurrency: 2, criticPromptVersion: 'critic.v1' };
 const criticOutput: CriticOutput = {
   verdict: 'supported',
   issues: [],
@@ -63,7 +63,7 @@ describe('createCriticStage', () => {
       config,
     });
 
-    await expect(stage('run-1')).resolves.toEqual({ reviewed: 1, failed: 0 });
+    await expect(stage('run-1')).resolves.toMatchObject({ reviewed: 1, failed: 0 });
     expect(saved[0]).toMatchObject({
       runId: 'run-1',
       signalId: 'signal-01',
@@ -105,7 +105,7 @@ describe('createCriticStage', () => {
       config,
     });
 
-    await expect(stage('run-1')).resolves.toEqual({ reviewed: 0, failed: 1 });
+    await expect(stage('run-1')).resolves.toMatchObject({ reviewed: 0, failed: 1, failureCategories: { 'invalid output': 1 } });
     expect(requests).toBe(3);
     expect(saved[0]).toMatchObject({
       agent: 'critic',
@@ -114,7 +114,7 @@ describe('createCriticStage', () => {
     });
   });
 
-  it('caps the run at 15 candidates with the most passed criteria', async () => {
+  it('caps the run at 8 candidates with the most passed criteria', async () => {
     const candidates = Array.from({ length: 16 }, (_, index) => candidate(index, index % 6));
     const { store, saved } = storeFor(candidates);
     let calls = 0;
@@ -124,13 +124,39 @@ describe('createCriticStage', () => {
         return { ok: true, data: criticOutput, model: 'test-model', attempts: 1 };
       }),
       store,
-      config,
+      config: { ...config, maxCriticPerRun: 8 },
     });
 
-    await expect(stage('run-1')).resolves.toEqual({ reviewed: 15, failed: 0 });
-    expect(calls).toBe(15);
-    expect(saved).toHaveLength(15);
+    await expect(stage('run-1')).resolves.toMatchObject({ reviewed: 8, failed: 0 });
+    expect(calls).toBe(8);
+    expect(saved).toHaveLength(8);
     expect(saved.some((row) => row.signalId === 'signal-12')).toBe(false);
     expect(saved.some((row) => row.signalId === 'signal-15')).toBe(true);
+  });
+
+  it('runs reviews at configured concurrency two and retries a rate-limited review once at stage end', async () => {
+    const candidates = Array.from({ length: 4 }, (_, index) => candidate(index));
+    const { store, saved } = storeFor(candidates);
+    let active = 0;
+    let maxActive = 0;
+    let first = true;
+    const stage = createCriticStage({
+      llm: llmFor(async () => {
+        active += 1;
+        maxActive = Math.max(maxActive, active);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        active -= 1;
+        if (first) {
+          first = false;
+          return { ok: false, kind: 'error', error: 'rate limited', model: null, attempts: 1, providerErrors: [{ provider: 'groq', status: 429, message: 'rate limited' }] };
+        }
+        return { ok: true, data: criticOutput, model: 'test-model', attempts: 1 };
+      }),
+      store,
+      config: { ...config, maxCriticPerRun: 4, concurrency: 2 },
+    });
+    await expect(stage('run-1')).resolves.toMatchObject({ reviewed: 4, failed: 0 });
+    expect(maxActive).toBe(2);
+    expect(saved).toHaveLength(4);
   });
 });

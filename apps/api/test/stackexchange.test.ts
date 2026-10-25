@@ -108,7 +108,7 @@ describe('Stack Exchange adapter', () => {
       return jsonResponse(apiBody([]));
     };
     await createStackExchangeAdapter({ sites: [] }).search(query, makeContext(fetchFn));
-    expect([...new Set(sites)]).toEqual(['softwarerecs', 'softwareengineering']);
+    expect([...new Set(sites)]).toEqual(['softwarerecs', 'softwareengineering', 'devops', 'serverfault']);
   });
 
   it('paginates while has_more is true and caps requests to the configured page count', async () => {
@@ -281,17 +281,17 @@ describe('Stack Exchange adapter', () => {
     expect(requests).toBe(0);
   });
 
-  it('drops invalid sites and limits configured sites to three', async () => {
+  it('drops invalid sites and limits configured sites to four', async () => {
     const requestedSites: string[] = [];
     const fetchFn: typeof fetch = async (input) => {
       requestedSites.push(new URL(String(input)).searchParams.get('site') ?? '');
       return jsonResponse(apiBody([]));
     };
     const adapter = createStackExchangeAdapter({
-      sites: ['Bad', 'stackoverflow', 'bad site', 'softwarerecs', 'unix', 'askubuntu'],
+      sites: ['Bad', 'stackoverflow', 'bad site', 'softwarerecs', 'unix', 'askubuntu', 'serverfault'],
     });
     await adapter.search({ ...query, keywords: ['one'] }, makeContext(fetchFn));
-    expect(requestedSites.slice(0, 3)).toEqual(['stackoverflow', 'softwarerecs', 'unix']);
+    expect(requestedSites.slice(0, 4)).toEqual(['stackoverflow', 'softwarerecs', 'unix', 'askubuntu']);
   });
 
   it('records one request with site and keyword, raw item count and quota', async () => {

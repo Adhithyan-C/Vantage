@@ -41,7 +41,7 @@ function configuredSites(sites: string[] | undefined): string[] {
   const unique = [...new Set(values
     .map((site) => site.trim())
     .filter((site) => /^[a-z0-9.]+$/.test(site)))];
-  return unique.length > 0 ? unique.slice(0, 3) : [...STACKEXCHANGE_DEFAULT_SITES];
+  return unique.length > 0 ? unique.slice(0, 4) : [...STACKEXCHANGE_DEFAULT_SITES];
 }
 
 export function mapQuestion(item: unknown, site: string): RawSignal | null {

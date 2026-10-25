@@ -71,6 +71,13 @@ function notRecorded(value: unknown): value is null | undefined {
   return value === null || value === undefined;
 }
 
+function failureSummary(event: RunEvent | undefined): string | null {
+  const categories = event?.counts?.failureCategories;
+  if (!categories || typeof categories !== 'object' || Array.isArray(categories)) return null;
+  const entries = Object.entries(categories).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && entry[1] > 0);
+  return entries.length > 0 ? entries.map(([reason, count]) => `${count} ${reason}`).join(', ') : null;
+}
+
 function StageDetails({
   stage,
   run,
@@ -93,6 +100,7 @@ function StageDetails({
   const skipped = complaintEvent?.counts?.skippedCompetitors;
   const reviews = leads.flatMap((lead) => lead.criticTrace ? [{ lead, trace: lead.criticTrace }] : []);
   const criticFinal = [...stageEvents].reverse().find((event) => event.message.startsWith('Reviewed '));
+  const failureEvent = [...stageEvents].reverse().find((event) => failureSummary(event) !== null);
   const spread = criticReviewSpread(leads);
   const issues = reviews.flatMap(({ lead, trace }) => {
     const values = trace.output.issues;
@@ -122,11 +130,13 @@ function StageDetails({
             return <li key={label}>{label.replaceAll('_', ' ')}: {typeof count === 'number' ? count : 'Not recorded for this run'}</li>;
           })}</ul>}
         <p>Classifier decisions remain available as the signal journey is opened.</p>
+        {failureSummary(failureEvent) && <p>Failures: {failureSummary(failureEvent)}</p>}
       </div>}
       {stage.agent === 'critic' && <div className="pipeline-detail-section">
         <p>The Critic records a verdict and concerns. It never changes a label or score.</p>
         <p>No corrections are recorded.</p>
         {criticFinal && <p>{typeof criticFinal.counts?.reviewed === 'number' ? criticFinal.counts.reviewed : 0} reviewed; {typeof criticFinal.counts?.failed === 'number' ? criticFinal.counts.failed : 0} failed.</p>}
+        {failureSummary(failureEvent) && <p>Failures: {failureSummary(failureEvent)}</p>}
         {reviews.length > 0 ? <>
           <h4>Recorded verdicts</h4>
           <ul><li>Supported: {spread.supported}</li><li>Weak: {spread.weak}</li><li>Unsupported: {spread.unsupported}</li></ul>

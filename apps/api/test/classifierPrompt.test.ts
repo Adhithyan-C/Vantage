@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { CRITERION_IDS } from '@vantage/shared';
 import { maxPostChars, promptVersion } from '../src/config/llm';
 import { buildClassifierPrompt, POST_END, POST_START } from '../src/llm/prompts/classifier.v2';
+import { buildClassifierPrompt as buildClassifierPromptV3 } from '../src/llm/prompts/classifier.v3';
 
 const seller = {
   productName: 'Support Desk',
@@ -25,7 +26,16 @@ describe('buildClassifierPrompt', () => {
   });
 
   it('uses classifier.v2', () => {
-    expect(promptVersion).toBe('classifier.v2');
+    expect(promptVersion).toBe('classifier.v3');
+  });
+
+  it('keeps the v2 prompt reproducible and adds the GitHub backlog hint only in v3', () => {
+    expect(buildClassifierPrompt({ seller, text: 'project issue' }).prompt).not.toContain('project’s own backlog');
+    const githubPrompt = buildClassifierPromptV3({ seller, text: 'project issue', source: 'github' }).prompt;
+    const hnPrompt = buildClassifierPromptV3({ seller, text: 'project issue', source: 'hackernews' }).prompt;
+    expect(githubPrompt).toContain('project’s own backlog');
+    expect(githubPrompt).toContain('choosing, comparing, or replacing a tool');
+    expect(hnPrompt).not.toContain('project’s own backlog');
   });
 
   it('restricts venting to seller-relevant customer support topics', () => {

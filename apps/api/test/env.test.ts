@@ -85,7 +85,8 @@ describe('loadEnv', () => {
   it('resolves the critic defaults and literal enable override', () => {
     expect(resolveLlmConfig({ ENABLE_CRITIC: 'true' })).toMatchObject({
       enableCritic: true,
-      maxCriticPerRun: 15,
+      maxCriticPerRun: 8,
+      criticConcurrency: 2,
       criticPromptVersion: 'critic.v1',
     });
     expect(resolveLlmConfig({ ENABLE_CRITIC: 'false' }).enableCritic).toBe(false);

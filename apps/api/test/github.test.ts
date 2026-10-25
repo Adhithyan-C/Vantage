@@ -61,6 +61,21 @@ describe('GitHub issue source', () => {
     });
   });
 
+  it('filters bots and reports the dropped bot count in request summaries', async () => {
+    const records: RequestRecord[] = [];
+    const fetch = async () => new Response(JSON.stringify({ items: [
+      issue(20),
+      { ...issue(21), user: { login: 'github-actions[bot]', type: 'User' } },
+      { ...issue(22), user: { login: 'automation', type: 'Bot' } },
+    ], total_count: 3 }), { status: 200 });
+    const result = await createGitHubAdapter().search({ ...query, maxResults: 10 }, context(fetch as typeof globalThis.fetch, {
+      onRequest: (record) => records.push(record),
+    }));
+    expect(result.signals.map((item) => item.externalId)).toEqual(['20']);
+    expect(records[0]?.responseSummary).toMatchObject({ returned: 3, botIssuesDropped: 2 });
+    expect(mapGitHubIssue({ ...issue(23), user: { login: 'github-actions[bot]' } }, 'query')).toBeNull();
+  });
+
   it('distinguishes a successful zero-hit response from an authentication failure without logging the token', async () => {
     const records: RequestRecord[] = [];
     const emptyFetch = vi.fn(async () => new Response(JSON.stringify({ items: [], total_count: 0 }), { status: 200 })) as typeof globalThis.fetch;

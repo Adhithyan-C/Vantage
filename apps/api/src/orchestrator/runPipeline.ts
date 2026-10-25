@@ -70,12 +70,13 @@ export function formatFailureReason(reasonKey: string): string {
   return provider === 'none' ? `HTTP ${status}` : `${provider} HTTP ${status}`;
 }
 
-function mostFrequentFailureReason(failureReasons: Record<string, number>): string {
-  const sorted = Object.entries(failureReasons).sort(
-    ([leftKey, leftCount], [rightKey, rightCount]) =>
-      rightCount - leftCount || leftKey.localeCompare(rightKey),
-  );
-  return sorted[0] ? formatFailureReason(sorted[0][0]) : 'unknown error';
+function summarizeFailureCategories(categories: Record<string, number> | undefined, failed: number): string {
+  if (!categories || Object.keys(categories).length === 0) return `${failed} provider unavailable`;
+  return Object.entries(categories)
+    .filter(([, count]) => count > 0)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([reason, count]) => `${count} ${reason}`)
+    .join(', ');
 }
 
 export async function runPipeline(
@@ -205,6 +206,7 @@ export async function runPipeline(
           relevanceTotal: relevance.total,
           eligible: relevance.eligible,
           excluded: relevance.excluded,
+          repositoryExcluded: relevance.repositoryExcludedIds.length,
           threshold: relevance.threshold,
         });
       } catch (err) {
@@ -253,14 +255,16 @@ export async function runPipeline(
             verifiedQuotes: summary.verifiedQuotes,
             droppedQuotes: summary.droppedQuotes,
             failureReasons: summary.failureReasons,
+            failureCategories: summary.failureCategories ?? {},
           },
         );
         if (summary.failed > 0) {
           classificationFailed = true;
-          const reason = mostFrequentFailureReason(summary.failureReasons);
+          const failureDetails = summarizeFailureCategories(summary.failureCategories, summary.failed);
           await emit.warning(
             'classifier',
-            `${summary.failed} signal(s) could not be classified (${reason})`,
+            `${summary.failed} failed: ${failureDetails}`,
+            { failed: summary.failed, failureCategories: summary.failureCategories ?? {} },
           );
         }
         const classified = summary.classified;
@@ -268,15 +272,22 @@ export async function runPipeline(
           const total = Math.min(classified, maxCriticPerRun);
           await emit.progress('critic', `Reviewing ${total} signal(s)`, { total });
           try {
-            const criticSummary = await deps.critic(runId);
+            const criticSummary = await deps.critic(runId, {
+              onRateLimitWait: async (provider, waitMs) => {
+                await emit.progress('critic', `Waiting for ${provider} rate limit (${waitDuration(waitMs)})`);
+              },
+            });
             await emit.info(
               'critic',
               `Reviewed ${criticSummary.reviewed} signal(s)`,
-              { reviewed: criticSummary.reviewed, failed: criticSummary.failed },
+              { reviewed: criticSummary.reviewed, failed: criticSummary.failed, failureCategories: criticSummary.failureCategories ?? {} },
             );
             if (criticSummary.failed > 0) {
               criticFailed = true;
-              await emit.warning('critic', `${criticSummary.failed} review(s) could not be completed`);
+              await emit.warning('critic', `${criticSummary.failed} failed: ${summarizeFailureCategories(criticSummary.failureCategories, criticSummary.failed)}`, {
+                failed: criticSummary.failed,
+                failureCategories: criticSummary.failureCategories ?? {},
+              });
             }
           } catch (err) {
             criticFailed = true;

@@ -70,11 +70,14 @@ export function createSignalJourneyStore(db: SupabaseClient): SignalJourneyStore
     const classifierCapped = eventsRows.some((row) => row.agent === 'classifier' && typeof row.message === 'string' && row.message.toLowerCase().includes('cap'));
     const criticCapped = eventsRows.some((row) => row.agent === 'critic' && typeof row.message === 'string' && row.message.toLowerCase().includes('cap'));
     const relevanceExcluded = relevance?.output.eligible === false;
+    const relevanceExclusionReason = typeof relevance?.output.exclusionReason === 'string'
+      ? relevance.output.exclusionReason
+      : 'Excluded before classification';
     const decisionStage = (trace: DecisionTrace | null, disabled: boolean, capped: boolean) => trace
       ? stageStatus(trace.status === 'ok' ? 'completed' : 'failed', trace.status === 'ok' ? undefined : trace.status)
       : disabled ? stageStatus('not_run', 'Disabled by configuration')
         : capped ? stageStatus('not_run', 'This signal was not included by the recorded stage cap')
-          : relevanceExcluded ? stageStatus('not_run', 'Excluded before classification')
+          : relevanceExcluded ? stageStatus('not_run', relevanceExclusionReason)
           : stageStatus('not_available');
     const enrichmentStatus = lead ? stageStatus('completed') : stageStatus('not_available');
     const ranked = label === 'buyer_intent' || label === 'competitor_complaint';

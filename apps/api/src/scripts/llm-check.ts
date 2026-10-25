@@ -33,7 +33,7 @@ console.log(`Effective provider order: ${config.providerOrder.join(', ')}`);
 for (const provider of ['groq', 'gemini'] as const) {
   const model = provider === 'groq' ? config.groqModel : config.geminiModel;
   if (!configured.has(provider)) {
-    console.log(`${provider} (${model}): not configured`);
+    console.log(`Provider ${provider} | model=${model}: not configured`);
   }
 }
 
@@ -56,14 +56,14 @@ for (const provider of diagnosticOrder) {
   }
   if (result.ok) {
     successes += 1;
-    console.log(`${provider} (${model}): OK`);
+    console.log(`Provider ${provider} | model=${model}: OK`);
   } else {
     const failure = result.providerErrors.at(-1);
     const status = failure?.status === null || failure?.status === undefined
       ? 'network error'
       : `HTTP ${failure.status}`;
     const message = failure?.message ?? result.error;
-    console.log(`${provider} (${model}): ${status} - ${message}`);
+    console.log(`Provider ${provider} | model=${model}: ${status} - ${message}`);
   }
 }
 

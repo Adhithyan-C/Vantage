@@ -2,6 +2,7 @@ import type { SellerProfileInput } from '@vantage/shared';
 import type { DecisionStore, RunSignalContext } from '../db/decisions';
 import { contentHash } from '../utils/hash';
 import { RELEVANCE_MAX_CLASSIFY_PER_RUN, RELEVANCE_THRESHOLD } from '../config/retrieval';
+import { GITHUB_MAX_SIGNALS_PER_REPOSITORY } from '../config/retrieval';
 import type { Embedder } from './displacement';
 
 export interface RelevanceConfig {
@@ -16,6 +17,7 @@ export interface RelevanceResult {
   excluded: number;
   threshold: number;
   scores: Record<string, number>;
+  repositoryExcludedIds: string[];
 }
 
 export type RelevanceStage = (runId: string, keywords?: string[]) => Promise<RelevanceResult>;
@@ -31,6 +33,16 @@ function cosine(left: number[], right: number[]): number {
   return dot / (leftNorm * rightNorm);
 }
 
+function repositoryOf(signal: RunSignalContext): string | null {
+  if (signal.source !== 'github') return null;
+  try {
+    const segments = new URL(signal.url).pathname.split('/').filter(Boolean);
+    return segments.length >= 2 ? `${segments[0]}/${segments[1]}`.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function scoreRelevance(
   seller: SellerProfileInput,
   signals: RunSignalContext[],
@@ -39,7 +51,7 @@ export async function scoreRelevance(
   keywords: string[] = [],
 ): Promise<RelevanceResult> {
   if (signals.length === 0) {
-    return { eligibleIds: [], total: 0, eligible: 0, excluded: 0, threshold: config.threshold, scores: {} };
+    return { eligibleIds: [], total: 0, eligible: 0, excluded: 0, threshold: config.threshold, scores: {}, repositoryExcludedIds: [] };
   }
   const profileText = [seller.problemDescription, seller.idealCustomer ?? '', ...seller.competitors, ...keywords]
     .filter(Boolean).join('\n');
@@ -54,7 +66,22 @@ export async function scoreRelevance(
     return { signal, score: cosine(profileVector, vector) };
   }).sort((left, right) => right.score - left.score || left.signal.id.localeCompare(right.signal.id));
   const aboveThreshold = scored.filter((item) => item.score >= config.threshold);
-  const selected = aboveThreshold.slice(0, config.maxClassifyPerRun);
+  const selected: typeof aboveThreshold = [];
+  const repositoryCounts = new Map<string, number>();
+  const repositoryExcludedIds: string[] = [];
+  for (const item of aboveThreshold) {
+    if (selected.length >= config.maxClassifyPerRun) break;
+    const repository = repositoryOf(item.signal);
+    if (repository) {
+      const count = repositoryCounts.get(repository) ?? 0;
+      if (count >= GITHUB_MAX_SIGNALS_PER_REPOSITORY) {
+        repositoryExcludedIds.push(item.signal.id);
+        continue;
+      }
+      repositoryCounts.set(repository, count + 1);
+    }
+    selected.push(item);
+  }
   const eligibleIds = selected.map((item) => item.signal.id);
   const scores = Object.fromEntries(scored.map(({ signal, score }) => [signal.id, Number(score.toFixed(4))]));
   return {
@@ -64,6 +91,7 @@ export async function scoreRelevance(
     excluded: signals.length - selected.length,
     threshold: config.threshold,
     scores,
+    repositoryExcludedIds,
   };
 }
 
@@ -80,6 +108,7 @@ export function createRelevanceStage({
     const context = await store.getRunContext(runId);
     const result = await scoreRelevance(context.seller, context.signals, embed, config, keywords);
     const eligible = new Set(result.eligibleIds);
+    const repositoryExcluded = new Set(result.repositoryExcludedIds);
     await Promise.all(context.signals.map((signal) => {
       const similarity = result.scores[signal.id] ?? 0;
       const included = eligible.has(signal.id);
@@ -95,7 +124,7 @@ export function createRelevanceStage({
           threshold: config.threshold,
           eligible: included,
           reason: included ? null : 'Excluded before classification',
-          exclusionReason: included ? null : similarity < config.threshold ? 'Below relevance threshold' : 'Excluded by relevance top-N cap',
+          exclusionReason: included ? null : repositoryExcluded.has(signal.id) ? 'Excluded: repository limit' : similarity < config.threshold ? 'Below relevance threshold' : 'Excluded by relevance top-N cap',
         },
         evidence: [],
         evidenceVerified: false,

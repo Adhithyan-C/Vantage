@@ -77,7 +77,7 @@ Names and requiredness below come from `apps/api/src/config/env.ts`; purposes ar
 | `REDDIT_CLIENT_ID` | No | Reserved optional Reddit API credential; adapter not implemented. |
 | `REDDIT_CLIENT_SECRET` | No | Reserved optional Reddit API credential; adapter not implemented. |
 | `STACKEXCHANGE_KEY` | No | Optional Stack Exchange application key; without one, the API has a lower daily quota. |
-| `STACKEXCHANGE_SITES` | No | Optional comma-separated Stack Exchange site IDs; defaults to `softwarerecs` and uses at most three valid IDs. |
+| `STACKEXCHANGE_SITES` | No | Optional comma-separated Stack Exchange site IDs; defaults to `softwarerecs`, `softwareengineering`, `devops` and `serverfault`, using at most four valid IDs. |
 | `GITHUB_TOKEN` | No | Optional GitHub REST token; improves the issue-search request limit. |
 | `PRODUCT_HUNT_TOKEN` | No | Optional Product Hunt developer token; retrieval remains blocked until permitted use is confirmed. |
 | `DEMO_MODE` | No | Selects recorded replay mode when set to `true`; defaults to live mode. |

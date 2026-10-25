@@ -18,7 +18,7 @@ interface GitHubIssue extends Record<string, unknown> {
   comments?: number;
   state?: string;
   repository_url?: string;
-  user?: { login?: string } | null;
+  user?: { login?: string; type?: string } | null;
   labels?: Array<{ name?: string }>;
 }
 
@@ -29,6 +29,10 @@ interface GitHubOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isGitHubBot(user: GitHubIssue['user']): boolean {
+  return user?.type?.toLowerCase() === 'bot' || /\[bot\]$/i.test(user?.login ?? '');
 }
 
 function errorText(error: unknown): string {
@@ -47,6 +51,7 @@ function parseIssues(value: unknown): { items: unknown[]; totalCount: number | n
 export function mapGitHubIssue(value: unknown, query: string): RawSignal | null {
   if (!isRecord(value)) return null;
   const issue = value as GitHubIssue;
+  if (isGitHubBot(issue.user)) return null;
   if (typeof issue.id !== 'number' || !Number.isInteger(issue.id) || typeof issue.title !== 'string' ||
       typeof issue.html_url !== 'string' || typeof issue.created_at !== 'string' ||
       typeof issue.user?.login !== 'string' || issue.user.login.trim() === '') return null;
@@ -188,6 +193,13 @@ export function createGitHubAdapter(options: GitHubOptions = {}): SourceAdapter 
               break;
             }
           }
+          const botIssuesDropped = (issues?.items ?? []).filter((item) => {
+            if (!isRecord(item)) return false;
+            const user = isRecord(item.user)
+              ? { login: typeof item.user.login === 'string' ? item.user.login : undefined, type: typeof item.user.type === 'string' ? item.user.type : undefined }
+              : null;
+            return isGitHubBot(user);
+          }).length;
           const mapped = (issues?.items ?? []).flatMap((item) => {
             const signal = mapGitHubIssue(item, variant.phrase);
             return signal ? [signal] : [];
@@ -223,6 +235,7 @@ export function createGitHubAdapter(options: GitHubOptions = {}): SourceAdapter 
                 totalCount: issues?.totalCount ?? null,
                 incomplete: issues?.incomplete ?? null,
                 retryCount,
+                botIssuesDropped,
                 sampleTitles: (issues?.items ?? []).slice(0, 5).flatMap((item) => isRecord(item) && typeof item.title === 'string' ? [htmlToText(item.title).slice(0, 120)] : []),
               },
             });

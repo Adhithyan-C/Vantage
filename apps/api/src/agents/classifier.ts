@@ -5,7 +5,8 @@ import type {
   SellerProfileInput,
 } from '@vantage/shared';
 import type { LlmClient, LlmResult, ProviderError } from '../llm/client';
-import { buildClassifierPrompt } from '../llm/prompts/classifier.v2';
+import { buildClassifierPrompt as buildClassifierPromptV2 } from '../llm/prompts/classifier.v2';
+import { buildClassifierPrompt as buildClassifierPromptV3 } from '../llm/prompts/classifier.v3';
 import { RUBRIC } from '../config/rubric';
 import type { DecisionRow, DecisionStore, RunSignalContext } from '../db/decisions';
 import { contentHash } from '../utils/hash';
@@ -29,6 +30,7 @@ export interface ClassifySummary {
   droppedQuotes: number;
   capped: boolean;
   failureReasons: Record<string, number>;
+  failureCategories?: Record<string, number>;
 }
 
 export type ClassifyProgress = (done: number, total: number) => void | Promise<void>;
@@ -110,6 +112,19 @@ function recordFailureReasons(summary: ClassifySummary, providerErrors: Provider
   }
 }
 
+function failureCategory(providerErrors: ProviderError[], invalidOutput = false): string {
+  if (invalidOutput || providerErrors.some((error) => error.status === 200)) return 'invalid output';
+  if (providerErrors.some((error) => /timeout|timed out|abort/i.test(error.message))) return 'timeout';
+  if (providerErrors.at(-1)?.status === 429) return 'rate limited';
+  return 'provider unavailable';
+}
+
+function recordFailureCategory(summary: ClassifySummary, providerErrors: ProviderError[], invalidOutput = false): void {
+  const category = failureCategory(providerErrors, invalidOutput);
+  const categories = summary.failureCategories ??= {};
+  categories[category] = (categories[category] ?? 0) + 1;
+}
+
 export function createClassifyStage({ llm, store, config }: ClassifyStageOptions): ClassifyStage {
   return async (runId, onProgress, options) => {
     const context = await store.getRunContext(runId);
@@ -141,11 +156,13 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
       droppedQuotes: 0,
       capped: signals.length > selected.length,
       failureReasons: {},
+      failureCategories: {},
     };
     let cursor = 0;
     let done = 0;
+    const rateLimitRetries: RunSignalContext[] = [];
 
-    async function classifySignal(signal: RunSignalContext): Promise<void> {
+    async function classifySignal(signal: RunSignalContext, allowRateLimitRetry = true): Promise<void> {
       const inputHash = buildInputHash(config, context.seller, signal);
       try {
         const reusable = await store.findReusable(inputHash);
@@ -172,14 +189,19 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
           return;
         }
 
-        const { system, prompt } = buildClassifierPrompt({ seller: context.seller, text: signal.text });
+        const promptParts = config.promptVersion === 'classifier.v3'
+          ? buildClassifierPromptV3({ seller: context.seller, text: signal.text, source: signal.source })
+          : buildClassifierPromptV2({ seller: context.seller, text: signal.text });
         const result = await llm.generateJson({
-          system,
-          prompt,
+          ...promptParts,
           schema: ClassifierOutputSchema,
           onRateLimitWait: options?.onRateLimitWait,
         });
         if (!result.ok) {
+          if (allowRateLimitRetry && result.providerErrors.at(-1)?.status === 429) {
+            rateLimitRetries.push(signal);
+            return;
+          }
           await store.saveDecision(
             emptyDecision(
               runId,
@@ -193,6 +215,7 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
           );
           summary.failed += 1;
           recordFailureReasons(summary, result.providerErrors);
+          recordFailureCategory(summary, result.providerErrors, result.kind === 'invalid_output');
           return;
         }
 
@@ -219,6 +242,7 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
       } catch {
         summary.failed += 1;
         recordFailureReasons(summary, []);
+        recordFailureCategory(summary, []);
         try {
           await store.saveDecision(
             emptyDecision(runId, signal.id, inputHash, config.promptVersion, 'error', null, []),
@@ -245,6 +269,17 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
         }
       }),
     );
+
+    if (rateLimitRetries.length > 0) {
+      let retryCursor = 0;
+      await Promise.all(Array.from({ length: Math.min(Math.max(1, config.concurrency), rateLimitRetries.length) }, async () => {
+        while (retryCursor < rateLimitRetries.length) {
+          const signal = rateLimitRetries[retryCursor];
+          retryCursor += 1;
+          if (signal) await classifySignal(signal, false);
+        }
+      }));
+    }
 
     return summary;
   };
