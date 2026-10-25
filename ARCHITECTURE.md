@@ -1543,3 +1543,7 @@ No LLM calls, no migration, no new packages. The graph shows which competitors a
 
 ### 35.8 Files
 `packages/shared/src/types.ts`, `report/competitorGraph.ts`, `routes/report.ts`, web `lib/api.ts`, `lib/graphLayout.ts`, `components/CompetitorGraph.tsx`, `pages/ThemesPage.tsx`, `pages/ReportPage.tsx`, `styles/tokens.css`, plus tests.
+
+## 36. Phase 10: visual redesign
+
+The web app uses a light-only, white-and-blue design system documented in `docs/DESIGN.md`, with a slim top navigation bar, a centered content column, accessible text-first badges, and restrained CSS motion. This phase changes presentation only: routes, behavior, data and API contracts remain unchanged; all motion respects `prefers-reduced-motion`, and report print styles remain supported.

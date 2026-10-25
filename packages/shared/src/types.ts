@@ -139,6 +139,13 @@ export interface ThemeView {
   sampleData: boolean;
 }
 
+export interface CompetitorGraphView {
+  nodes: Array<{ competitor: string; mentionCount: number }>;
+  edges: Array<{ a: string; b: string; weight: number }>;
+  signalCount: number;
+  sampleData: boolean;
+}
+
 export interface RunSourceView {
   source: SourceId;
   status: SourceStatus;

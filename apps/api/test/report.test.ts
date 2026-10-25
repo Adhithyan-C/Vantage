@@ -208,3 +208,16 @@ describe('report routes', () => {
     expect(result.calls).toEqual([true]);
   });
 });
+
+describe('competitor graph route', () => {
+  it('returns 400, 404, 409 and the computed graph for valid completed runs', async () => {
+    const path = '/runs/:runId/competitor-graph';
+    expect(await invoke(path, { runId: 'bad' })).toMatchObject({ statusCode: 400, body: { error: 'Invalid run id' } });
+    expect(await invoke(path, { runId: RUN_ID }, {}, { run: null })).toMatchObject({ statusCode: 404, body: { error: 'Run not found' } });
+    expect(await invoke(path, { runId: RUN_ID }, {}, { run: { ...run, status: 'running' } })).toMatchObject({ statusCode: 409, body: { error: 'Run is still running' } });
+    expect(await invoke(path, { runId: RUN_ID }, {}, { signals: [ranked, { ...ranked, label: 'competitor_complaint', leadId: 'other', enrichment: { ...ranked.enrichment, competitorsMentioned: ['Zendesk', 'Acme'] } }] })).toMatchObject({
+      statusCode: 200,
+      body: { graph: { signalCount: 2, nodes: [{ competitor: 'Zendesk', mentionCount: 2 }, { competitor: 'Acme', mentionCount: 1 }], edges: [{ a: 'Acme', b: 'Zendesk', weight: 1 }], sampleData: false } },
+    });
+  });
+});

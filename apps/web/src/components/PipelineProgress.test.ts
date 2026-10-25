@@ -34,7 +34,7 @@ const scoutComplete: RunEvent = {
 };
 
 function stageEvent(
-  agent: 'enricher' | 'scorer' | 'displacement',
+  agent: 'enricher' | 'scorer' | 'displacement' | 'critic',
   kind: RunEvent['kind'],
   message: string,
   counts: Record<string, unknown> | null = null,
@@ -139,5 +139,22 @@ describe('Displacement pipeline stage', () => {
     const html = renderToString(createElement(PipelineProgress, { run: run('running'), events: [] }));
     expect(html).toContain('Displacement');
     expect(html).not.toContain('Planned</span>');
+  });
+});
+
+describe('PipelineProgress execution order and Critic stage', () => {
+  it('lists the real execution order and applies Classifier badge rules to Critic', () => {
+    const pending = renderToString(createElement(PipelineProgress, { run: run('running'), events: [] }));
+    const stageNames = ['Scout', 'Classifier', 'Critic', 'Enricher', 'Scorer', 'Displacement'];
+    const positions = stageNames.map((name) => pending.indexOf(`>${name}</p>`));
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
+    expect(pending).toContain('Waiting');
+
+    const completed = renderToString(createElement(PipelineProgress, {
+      run: run('completed'),
+      events: [stageEvent('critic', 'info', 'Reviewed 2 signal(s)', { reviewed: 2, failed: 0 })],
+    }));
+    expect(completed).toContain('2 reviewed');
+    expect(completed).toContain('Completed');
   });
 });

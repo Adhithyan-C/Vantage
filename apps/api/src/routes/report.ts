@@ -5,6 +5,7 @@ import { promptVersion } from '../config/llm';
 import type { LeadStore } from '../db/leads';
 import type { RunStore } from '../db/runs';
 import { buildReportCsv } from '../report/csv';
+import { buildCompetitorGraph } from '../report/competitorGraph';
 import { sanitizeRequestError } from '../utils/redact';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -76,6 +77,30 @@ export async function buildReport(
 
 export function createReportRouter(deps: { runStore: RunStore; leadStore: LeadStore }): express.Router {
   const router = express.Router();
+
+  router.get('/runs/:runId/competitor-graph', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const run = await deps.runStore.getRun(runId);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      if (run.status === 'running') {
+        res.status(409).json({ error: 'Run is still running' });
+        return;
+      }
+      const leads = await deps.leadStore.listLeads(runId, true);
+      res.status(200).json({ graph: buildCompetitorGraph(leads) });
+    } catch (err) {
+      console.error(`GET /runs/:runId/competitor-graph failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
 
   router.get('/runs/:runId/report.json', async (req, res) => {
     try {

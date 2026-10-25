@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderToString } from 'react-dom/server';
-import type { LeadView, ReportView, ThemeView } from '@vantage/shared';
+import type { CompetitorGraphView, LeadView, ReportView, ThemeView } from '@vantage/shared';
 import { ReportContent } from './ReportPage';
 
 const ranked: LeadView = {
@@ -60,6 +60,7 @@ function report(signals: LeadView[] = [ranked, other], sampleData = false): Repo
 
 describe('report page rendering', () => {
   const theme: ThemeView = { id: 'theme', runId: '00000000-0000-0000-0000-000000000001', competitor: 'Acme', title: 'Acme: slow search', summary: '3 signals', quotes: [], members: [], sampleData: false };
+  const graph: CompetitorGraphView = { nodes: [{ competitor: 'Acme', mentionCount: 2 }, { competitor: 'Beacon', mentionCount: 1 }], edges: [{ a: 'Acme', b: 'Beacon', weight: 1 }], signalCount: 2, sampleData: false };
 
   it('places competitor themes between ranked and other signals and hides an empty section', () => {
     const html = renderToString(<ReportContent report={report()} themes={[theme]} />);
@@ -74,6 +75,15 @@ describe('report page rendering', () => {
     expect(html).toContain('Themes unavailable');
     expect(html).toContain('Ranked signals');
     expect(html).toContain('Other signals');
+  });
+
+  it('shows competitor co-mentions after themes and keeps graph errors inline', () => {
+    const html = renderToString(<ReportContent report={report()} themes={[theme]} competitorGraph={graph} />);
+    expect(html.indexOf('Competitor themes')).toBeLessThan(html.indexOf('Competitor co-mentions'));
+    expect(html).toContain('Acme<!-- --> + <!-- -->Beacon');
+    const failed = renderToString(<ReportContent report={report()} competitorGraphError="Graph offline" retryCompetitorGraph={() => {}} />);
+    expect(failed).toContain('Graph offline');
+    expect(failed).toContain('Ranked signals');
   });
   it('shows the sample data banner only when the report includes sample data', () => {
     const withSample = renderToString(<ReportContent report={report([ranked, other], true)} />);

@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ThemeView } from '@vantage/shared';
+import type { CompetitorGraphView, ThemeView } from '@vantage/shared';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { LoadingState } from '../components/LoadingState';
 import { ThemeCard } from '../components/ThemeCard';
-import { getThemes } from '../lib/api';
+import { getCompetitorGraph, getThemes } from '../lib/api';
+import { CompetitorGraph } from '../components/CompetitorGraph';
 
 export function ThemesPage({ runId }: { runId: string }) {
   const [themes, setThemes] = useState<ThemeView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [graph, setGraph] = useState<CompetitorGraphView | null>(null);
+  const [graphError, setGraphError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -21,9 +24,27 @@ export function ThemesPage({ runId }: { runId: string }) {
       setLoading(false);
     }
   }, [runId]);
+  const loadGraph = useCallback(async () => {
+    setGraphError(null);
+    try {
+      setGraph(await getCompetitorGraph(runId));
+    } catch (err) {
+      setGraphError(err instanceof Error ? err.message : String(err));
+    }
+  }, [runId]);
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { void loadGraph(); }, [loadGraph]);
 
-  return <ThemesContent runId={runId} themes={themes} loading={loading} error={error} retry={() => void load()} />;
+  return (
+    <div className="stack">
+      <ThemesContent runId={runId} themes={themes} loading={loading} error={error} retry={() => void load()} />
+      <section className="card" aria-labelledby="themes-graph-title">
+        <h2 className="card-title" id="themes-graph-title">Competitor co-mentions</h2>
+        {graphError ? <ErrorState title="Could not load competitor co-mentions" message={graphError} onRetry={() => void loadGraph()} />
+          : graph ? <CompetitorGraph graph={graph} /> : <LoadingState label="Loading competitor co-mentions" />}
+      </section>
+    </div>
+  );
 }
 
 export function ThemesContent({ runId, themes, loading, error, retry }: {

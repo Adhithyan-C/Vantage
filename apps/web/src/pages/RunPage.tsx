@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
 import { PipelineProgress, RunStatusBadge } from '../components/PipelineProgress';
+import { PipelineGraph } from '../components/PipelineGraph';
 import { SourceActivity } from '../components/SourceActivity';
 import { useRunEvents } from '../hooks/useRunEvents';
 import { EVENT_KIND_LABEL, formatClock, formatDuration, shortId } from '../lib/format';
@@ -58,6 +59,7 @@ export function RunPage({ runId }: { runId: string }) {
 
       {error && <ErrorState title="Connection problem" message={error} onRetry={retry} />}
 
+      <PipelineGraph runStatus={run.status} events={events} />
       <PipelineProgress run={run} events={events} />
       <SourceActivity requests={requests} run={run} />
 

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { LeadView, ReportView, ThemeView } from '@vantage/shared';
+import type { CompetitorGraphView, LeadView, ReportView, ThemeView } from '@vantage/shared';
 import { EmptyState } from '../components/EmptyState';
 import { ErrorState } from '../components/ErrorState';
-import { ApiError, getReport, getThemes } from '../lib/api';
+import { ApiError, getCompetitorGraph, getReport, getThemes } from '../lib/api';
 import { LABEL_TEXT, shortId, SOURCE_LABEL, formatAge } from '../lib/format';
 import { ScoreMeter } from '../components/ScoreMeter';
 import { LoadingState } from '../components/LoadingState';
 import { ThemeCard } from '../components/ThemeCard';
+import { CompetitorGraph } from '../components/CompetitorGraph';
 
 const CRITERION_TEXT: Record<string, string> = {
   states_problem: 'States a problem',
@@ -73,11 +74,14 @@ function RankedSignal({ signal }: { signal: LeadView }) {
   );
 }
 
-export function ReportContent({ report, themes = [], themesError, retryThemes }: {
+export function ReportContent({ report, themes = [], themesError, retryThemes, competitorGraph, competitorGraphError, retryCompetitorGraph }: {
   report: ReportView;
   themes?: ThemeView[];
   themesError?: string | null;
   retryThemes?: () => void;
+  competitorGraph?: CompetitorGraphView | null;
+  competitorGraphError?: string | null;
+  retryCompetitorGraph?: () => void;
 }) {
   const rankedSignals = report.signals.filter(isRanked);
   const otherSignals = report.signals.filter((signal) => !isRanked(signal));
@@ -147,6 +151,14 @@ export function ReportContent({ report, themes = [], themesError, retryThemes }:
         </section>
       )}
 
+      {(competitorGraph || competitorGraphError) && (
+        <section className="card" aria-labelledby="competitor-graph-title">
+          <h2 className="card-title" id="competitor-graph-title">Competitor co-mentions</h2>
+          {competitorGraphError ? <ErrorState title="Could not load competitor co-mentions" message={competitorGraphError} onRetry={retryCompetitorGraph} />
+            : competitorGraph ? <CompetitorGraph graph={competitorGraph} /> : null}
+        </section>
+      )}
+
       <section className="card" aria-labelledby="other-signals-title">
         <h2 className="card-title" id="other-signals-title">Other signals</h2>
         {otherSignals.length === 0 ? <p className="muted">No other signals. <a href="#ranked-signals-title">Review ranked signals</a></p> : (
@@ -187,6 +199,8 @@ export function ReportPage({ runId }: { runId: string }) {
   const [loading, setLoading] = useState(true);
   const [themes, setThemes] = useState<ThemeView[]>([]);
   const [themesError, setThemesError] = useState<string | null>(null);
+  const [competitorGraph, setCompetitorGraph] = useState<CompetitorGraphView | null>(null);
+  const [competitorGraphError, setCompetitorGraphError] = useState<string | null>(null);
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -208,8 +222,18 @@ export function ReportPage({ runId }: { runId: string }) {
     }
   }, [runId]);
 
+  const loadCompetitorGraph = useCallback(async () => {
+    setCompetitorGraphError(null);
+    try {
+      setCompetitorGraph(await getCompetitorGraph(runId));
+    } catch (err) {
+      setCompetitorGraphError(err instanceof Error ? err.message : String(err));
+    }
+  }, [runId]);
+
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { void loadThemes(); }, [loadThemes]);
+  useEffect(() => { void loadCompetitorGraph(); }, [loadCompetitorGraph]);
 
   if (loading) {
     return <LoadingState label="Loading report" />;
@@ -223,5 +247,5 @@ export function ReportPage({ runId }: { runId: string }) {
   if (error) {
     return <ErrorState title="Could not load report" message={error.message} onRetry={() => void load()} />;
   }
-  return report ? <ReportContent report={report} themes={themes} themesError={themesError} retryThemes={() => void loadThemes()} /> : null;
+  return report ? <ReportContent report={report} themes={themes} themesError={themesError} retryThemes={() => void loadThemes()} competitorGraph={competitorGraph} competitorGraphError={competitorGraphError} retryCompetitorGraph={() => void loadCompetitorGraph()} /> : null;
 }

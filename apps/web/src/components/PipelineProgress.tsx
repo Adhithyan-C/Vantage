@@ -11,10 +11,11 @@ interface Stage {
 
 const STAGES: Stage[] = [
   { id: 'scout', name: 'Scout', description: 'Fetch, remove duplicates, store signals', built: true },
-  { id: 'displacement', name: 'Displacement', description: 'Group competitor complaints', built: true },
   { id: 'classifier', name: 'Classifier', description: 'Label buying intent with evidence', built: true },
+  { id: 'critic', name: 'Critic', description: 'Review classification evidence', built: true },
   { id: 'enricher', name: 'Enricher', description: 'Add structured context', built: true },
   { id: 'scorer', name: 'Scorer', description: 'Compute the score from the evidence', built: true },
+  { id: 'displacement', name: 'Displacement', description: 'Group competitor complaints', built: true },
 ];
 
 export function RunStatusBadge({ status }: { status: RunStatus }) {
@@ -77,18 +78,19 @@ export function scoutStatus(run: RunView, events: RunEvent[]): string {
   return 'Running';
 }
 
-function classifierStatus(run: RunView, events: RunEvent[]): string {
-  const classifierEvents = events.filter((event) => event.agent === 'classifier');
-  if (classifierEvents.length === 0) {
+function classifierStatus(run: RunView, events: RunEvent[], agent: 'classifier' | 'critic' = 'classifier'): string {
+  const stageEvents = events.filter((event) => event.agent === agent);
+  if (stageEvents.length === 0) {
     return run.status === 'running' ? 'Waiting' : 'Skipped';
   }
-  const completed = classifierEvents.some(
-    (event) => event.kind === 'info' && event.message.startsWith('Classified '),
+  const prefix = agent === 'classifier' ? 'Classified ' : 'Reviewed ';
+  const completed = stageEvents.some(
+    (event) => event.kind === 'info' && event.message.startsWith(prefix),
   );
   if (!completed) {
     return 'Running';
   }
-  return classifierEvents.some((event) => event.kind === 'warning' || event.kind === 'error')
+  return stageEvents.some((event) => event.kind === 'warning' || event.kind === 'error')
     ? 'Completed with warnings'
     : 'Completed';
 }
@@ -105,6 +107,12 @@ function classifierSummary(events: RunEvent[]): string {
     return typeof value === 'number' ? value : 0;
   };
   return `${count('buyer_intent')} buyer intent · ${count('competitor_complaint')} competitor complaint · ${count('venting')} venting · ${count('noise')} noise`;
+}
+
+function criticSummary(events: RunEvent[]): string {
+  const finalEvent = [...events].reverse().find((event) => event.agent === 'critic' && event.kind === 'info' && event.message.startsWith('Reviewed '));
+  const reviewed = finalEvent?.counts?.reviewed;
+  return typeof reviewed === 'number' ? `${reviewed} reviewed` : '';
 }
 
 export function agentStageStatus(
@@ -171,6 +179,8 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
   const scoutBadge = scoutStatus(run, events);
   const classifierInfo = classifierSummary(events);
   const classifierBadge = classifierStatus(run, events);
+  const criticInfo = criticSummary(events);
+  const criticBadge = classifierStatus(run, events, 'critic');
   const enricherInfo = agentSummary(events, 'enricher');
   const enricherBadge = agentStageStatus('enricher', 'Enriched ', run, events);
   const scorerInfo = agentSummary(events, 'scorer');
@@ -194,6 +204,7 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
               {stage.id === 'classifier' && classifierInfo && (
                 <p className="stage-summary">{classifierInfo}</p>
               )}
+              {stage.id === 'critic' && criticInfo && <p className="stage-summary">{criticInfo}</p>}
               {stage.id === 'enricher' && enricherInfo && (
                 <p className="stage-summary">{enricherInfo}</p>
               )}
@@ -205,6 +216,8 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
               <span className="badge badge-planned">{scoutBadge}</span>
             ) : stage.id === 'classifier' ? (
               <span className="badge badge-planned">{classifierBadge}</span>
+            ) : stage.id === 'critic' ? (
+              <span className="badge badge-planned">{criticBadge}</span>
             ) : stage.id === 'displacement' ? (
               <span className="badge badge-planned">{displacementBadge}</span>
             ) : stage.id === 'enricher' ? (

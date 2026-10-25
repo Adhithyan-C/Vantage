@@ -1,4 +1,4 @@
-import type { FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
+import type { CompetitorGraphView, FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
 
 const BASE = '/api';
 
@@ -77,6 +77,11 @@ export function getReport(runId: string): Promise<ReportView> {
 export async function getThemes(runId: string): Promise<ThemeView[]> {
   const body = await request<{ themes: ThemeView[] }>(`/runs/${encodeURIComponent(runId)}/themes`);
   return body.themes;
+}
+
+export async function getCompetitorGraph(runId: string): Promise<CompetitorGraphView> {
+  const body = await request<{ graph: CompetitorGraphView }>(`/runs/${encodeURIComponent(runId)}/competitor-graph`);
+  return body.graph;
 }
 
 export async function getEvents(runId: string, after: number): Promise<RunEvent[]> {

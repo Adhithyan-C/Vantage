@@ -6,6 +6,7 @@ import { DEMO_RUN_PARAMS, loadDemoSeller } from '../config/demo';
 import type { DecisionStore } from '../db/decisions';
 import { runPipeline } from '../orchestrator/runPipeline';
 import type { PipelineDeps } from '../orchestrator/runPipeline';
+import { SSE_HEARTBEAT_MS, SSE_MAX_MS, SSE_TICK_MS } from '../config/stream';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -15,9 +16,13 @@ function errorMessage(err: unknown): string {
 
 export function createRunsRouter(
   deps: PipelineDeps & { decisionStore?: DecisionStore; leadStore?: LeadStore },
+  streamTimings: { tickMs?: number; heartbeatMs?: number; maxMs?: number } = {},
 ): express.Router {
   const router = express.Router();
   const { store } = deps;
+  const tickMs = streamTimings.tickMs ?? SSE_TICK_MS;
+  const heartbeatMs = streamTimings.heartbeatMs ?? SSE_HEARTBEAT_MS;
+  const maxMs = streamTimings.maxMs ?? SSE_MAX_MS;
 
   router.post('/runs', async (req, res) => {
     try {
@@ -104,6 +109,103 @@ export function createRunsRouter(
     } catch (err) {
       console.error(`GET /runs/:runId/events failed: ${errorMessage(err)}`);
       res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  router.get('/runs/:runId/events/stream', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const rawAfter = req.query.after;
+      let lastId = 0;
+      if (rawAfter !== undefined) {
+        if (typeof rawAfter !== 'string' || !/^\d+$/.test(rawAfter) || !Number.isSafeInteger(Number(rawAfter))) {
+          res.status(400).json({ error: 'Invalid after' });
+          return;
+        }
+        lastId = Number(rawAfter);
+      }
+      const lastEventId = req.get('Last-Event-ID');
+      if (lastEventId && /^\d+$/.test(lastEventId) && Number.isSafeInteger(Number(lastEventId))) {
+        lastId = Math.max(lastId, Number(lastEventId));
+      }
+      const initialRun = await store.getRun(runId);
+      if (!initialRun) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+
+      res.set({
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
+        Connection: 'keep-alive',
+        'X-Accel-Buffering': 'no',
+      });
+      res.flushHeaders();
+      let ended = false;
+      let timersCleared = false;
+      let ticking = false;
+      const cleanup = (): void => {
+        if (timersCleared) return;
+        timersCleared = true;
+        ended = true;
+        clearInterval(tickTimer);
+        clearInterval(heartbeatTimer);
+        clearTimeout(maxTimer);
+      };
+      const end = (status?: string): void => {
+        if (ended) return;
+        ended = true;
+        cleanup();
+        if (status !== undefined && !res.writableEnded) {
+          res.write(`event: done\ndata: ${JSON.stringify({ status })}\n\n`);
+        }
+        if (!res.writableEnded) res.end();
+      };
+      const sendEvents = async (): Promise<void> => {
+        const events = await store.listEvents(runId, lastId);
+        for (const event of [...events].sort((left, right) => left.id - right.id)) {
+          if (ended) return;
+          if (event.id <= lastId) continue;
+          res.write(`id: ${event.id}\nevent: run_event\ndata: ${JSON.stringify(event)}\n\n`);
+          lastId = event.id;
+        }
+      };
+      const tick = async (): Promise<void> => {
+        if (ended || ticking) return;
+        ticking = true;
+        try {
+          await sendEvents();
+          const run = await store.getRun(runId);
+          if (!run || run.status !== 'running') {
+            await sendEvents();
+            end(run?.status ?? 'failed');
+          }
+        } catch (err) {
+          console.error(`GET /runs/:runId/events/stream failed: ${errorMessage(err)}`);
+          if (!ended) {
+            res.write('event: fatal\ndata: {}\n\n');
+            end();
+          }
+        } finally {
+          ticking = false;
+        }
+      };
+      const tickTimer = setInterval(() => { void tick(); }, tickMs);
+      const heartbeatTimer = setInterval(() => {
+        if (!ended) res.write(': keepalive\n\n');
+      }, heartbeatMs);
+      const maxTimer = setTimeout(() => end(), maxMs);
+      res.on('close', cleanup);
+      req.on('aborted', cleanup);
+      void tick();
+    } catch (err) {
+      console.error(`GET /runs/:runId/events/stream failed: ${errorMessage(err)}`);
+      if (!res.headersSent) res.status(500).json({ error: 'Internal error' });
+      else res.end();
     }
   });
 

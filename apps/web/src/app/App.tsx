@@ -34,9 +34,9 @@ export function App() {
         : route.name === 'report' ? 'Report' : route.name === 'themes' ? 'Competitor themes' : 'Page not found';
   const runPath = currentRunId ? `/runs/${encodeURIComponent(currentRunId)}` : null;
   const navItem = (label: string, icon: NavigationIcon, href: string, active: boolean) => (
-    <a className={`sidebar-link${active ? ' is-active' : ''}`} href={href} aria-label={label} title={label} aria-current={active ? 'page' : undefined}>
+    <a className={`topbar-link${active ? ' is-active' : ''}`} href={href} aria-current={active ? 'page' : undefined}>
       <NavigationGlyph name={icon} />
-      <span className="sidebar-label">{label}</span>
+      <span>{label}</span>
     </a>
   );
 
@@ -44,13 +44,12 @@ export function App() {
     <div className="app">
       <DemoBanner />
       <div className="app-layout">
-        <aside className="app-sidebar">
+        <header className="topbar">
           <a className="brand" href="#/" aria-label="Vantage home">
             <span className="brand-mark" aria-hidden="true">V</span>
             <span className="brand-name">Vantage</span>
           </a>
-          <p className="sidebar-caption">SIGNAL INTELLIGENCE</p>
-          <nav className="sidebar-nav" aria-label="Main navigation">
+          <nav className="topbar-nav" aria-label="Main navigation">
             {navItem('New search', 'search', '#/', route.name === 'setup')}
             {runPath && <>
               {navItem('Run overview', 'run', `#${runPath}`, route.name === 'run')}
@@ -59,17 +58,12 @@ export function App() {
               {navItem('Competitor themes', 'themes', `#${runPath}/themes`, route.name === 'themes')}
             </>}
           </nav>
-          <div className="sidebar-footnote">
-            <span className="sidebar-live-dot" aria-hidden="true" />
-            <span>Public signals · evidence shown</span>
+          <div className="topbar-context">
+            <span>{currentPage}</span>
+            {currentRunId && <span className="mono">Run {currentRunId.slice(0, 8)}</span>}
           </div>
-        </aside>
-
+        </header>
         <div className="app-workspace">
-          <header className="workspace-header">
-            <div className="workspace-crumb"><span>WORKSPACE</span><span aria-hidden="true">/</span><strong>{currentPage}</strong></div>
-            {route.name !== 'setup' && <a className="btn btn-secondary header-action" href="#/">New search</a>}
-          </header>
           <main className="app-main">
             <div className="page-transition" key={`${route.name}:${currentRunId ?? ''}`}>
               {route.name === 'setup' && <SetupPage />}
