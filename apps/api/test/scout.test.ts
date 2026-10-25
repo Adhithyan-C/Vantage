@@ -50,6 +50,28 @@ describe('dedupeSignals', () => {
     const s2 = makeSignal('c2', longText);
     expect(dedupeSignals([s1, s2])).toHaveLength(1);
   });
+
+  it('deduplicates canonical URLs across sources and retains alternate URLs and queries', () => {
+    const first = { ...makeSignal('hn-1', 'same canonical post from two sources', 'hackernews'),
+      url: 'https://example.test/post?id=4&utm_source=hn#comments', metadata: { title: 'Same post', queriesFound: ['first query'] } };
+    const second = { ...makeSignal('gh-2', 'a different body from canonical page', 'github'),
+      url: 'https://EXAMPLE.test/post?id=4&ref=home', metadata: { title: 'Same post', queriesFound: ['second query'] } };
+    const result = dedupeSignals([first, second]);
+    expect(result).toHaveLength(1);
+    expect(result[0]?.source).toBe('hackernews');
+    expect(result[0]?.metadata).toMatchObject({
+      alternateUrls: ['https://EXAMPLE.test/post?id=4&ref=home'],
+      queriesFound: ['first query', 'second query'],
+      mergedSources: [{ source: 'github', externalId: 'gh-2' }],
+    });
+  });
+
+  it('uses author in content fingerprints so different reporters remain separate', () => {
+    const text = 'This is a long public post describing the exact same type of issue in some detail.';
+    const first = { ...makeSignal('auth-1', text), authorHandle: 'alice' };
+    const second = { ...makeSignal('auth-2', text, 'github'), authorHandle: 'bob' };
+    expect(dedupeSignals([first, second])).toHaveLength(2);
+  });
 });
 
 describe('runScout', () => {

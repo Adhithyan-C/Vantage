@@ -296,7 +296,7 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
         await Promise.all([
           db
             .from('signals')
-            .select('id, source, url, author_handle, community, created_at_source, text_snapshot')
+            .select('id, source, url, author_handle, community, created_at_source, text_snapshot, metadata, content_completeness')
             .in('id', signalIds),
           db
             .from('decisions')
@@ -379,6 +379,9 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
           breakdown: parsedBreakdown.data as ScoreBreakdown,
           enrichment,
           criticTrace: criticBySignal.get(signalId) ?? null,
+          ...(Object.keys(asRecord(signal.metadata)).length > 0 ? { metadata: asRecord(signal.metadata) } : {}),
+          ...(signal.content_completeness === 'complete' || signal.content_completeness === 'snippet' || signal.content_completeness === 'title_only'
+            ? { contentCompleteness: signal.content_completeness } : {}),
         }];
       });
     },
@@ -397,7 +400,7 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
       }
       const { data: signal, error: signalError } = await db
         .from('signals')
-        .select('id, source, url, author_handle, community, created_at_source, text_snapshot')
+        .select('id, source, url, author_handle, community, created_at_source, text_snapshot, metadata, content_completeness')
         .eq('id', lead.signal_id)
         .maybeSingle();
       if (signalError) {
@@ -485,6 +488,9 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
         evidenceVerified: decision.status === 'ok',
         breakdown: breakdown.data,
         enrichment,
+        ...(Object.keys(asRecord(signal.metadata)).length > 0 ? { metadata: asRecord(signal.metadata) } : {}),
+        ...(signal.content_completeness === 'complete' || signal.content_completeness === 'snippet' || signal.content_completeness === 'title_only'
+          ? { contentCompleteness: signal.content_completeness } : {}),
       };
       return {
         lead: view,

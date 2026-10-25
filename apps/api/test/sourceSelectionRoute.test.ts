@@ -107,4 +107,24 @@ describe('POST /runs source selection', () => {
     expect(store.sources).toContain('snapshot');
     expect(searched).toEqual(['snapshot']);
   });
+
+  it('accepts GitHub and DEV when those adapters are registered', async () => {
+    const store = new FakeRunStore();
+    const searched: SourceId[] = [];
+    const adapters: SourceAdapter[] = (['github', 'devto'] as const).map((id) => ({
+      id,
+      async search() {
+        searched.push(id);
+        return { signals: [], status: 'ok' };
+      },
+    }));
+    const result = await invoke({
+      ...requestBody,
+      params: { ...requestBody.params, sources: ['github', 'devto'] },
+    }, store, adapters);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(result.statusCode).toBe(202);
+    expect(store.createdParams?.sources).toEqual(['github', 'devto']);
+    expect(searched).toEqual(['github', 'devto']);
+  });
 });

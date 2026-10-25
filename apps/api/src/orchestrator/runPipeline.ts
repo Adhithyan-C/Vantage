@@ -2,6 +2,7 @@ import type { RequestRecord, RunParams, RunStatus, SourceStatus } from '@vantage
 import type { RunStore } from '../db/runs';
 import type { SourceAdapter, AdapterContext } from '../sources/types';
 import { runScout } from '../agents/scout';
+import { buildSearchVariants } from '../agents/queryVariants';
 import type { ClassifyStage, ClassifySummary } from '../agents/classifier';
 import type { ScoreStage } from '../agents/scorer';
 import type { CriticStage } from '../agents/critic';
@@ -114,6 +115,12 @@ export async function runPipeline(
     await emit.progress('scout', `Searching ${ids} for ${params.keywords.length} keyword(s)`);
 
     const run = await store.getRun(runId);
+    const seller = run ? { ...run.seller, idealCustomer: run.seller.idealCustomer ?? undefined } : {
+      productName: params.keywords[0] ?? 'Product',
+      problemDescription: params.keywords.join(' '),
+      competitors: [],
+    };
+    const variants = buildSearchVariants({ seller, keywords: params.keywords, maxVariants: 8 });
     const scoutCtx: AdapterContext = {
       ...ctx,
       onRequest: (record) => {
@@ -129,7 +136,8 @@ export async function runPipeline(
         keywords: params.keywords,
         sinceDays: params.sinceDays,
         maxResults: params.maxResults,
-        ...(run ? { seller: { ...run.seller, idealCustomer: run.seller.idealCustomer ?? undefined } } : {}),
+        seller,
+        variants,
       },
       ctx: scoutCtx,
     });

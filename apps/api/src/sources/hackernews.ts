@@ -6,8 +6,9 @@ import { fetchWithRetry } from '../utils/rateLimit.js';
 import { sanitizeRequestError } from '../utils/redact.js';
 import { mapWithConcurrency } from '../utils/concurrency.js';
 import { buildSearchVariants } from '../agents/queryVariants.js';
-import { HN_MAX_PAGES_PER_VARIANT, MAX_HN_QUERY_VARIANTS } from '../config/retrieval.js';
-import type { SearchVariant } from '../agents/queryVariants.js';
+import { HN_MAX_PAGES_PER_VARIANT, MAX_HN_QUERY_VARIANTS, MIN_RESULTS_BEFORE_UNQUOTED_FALLBACK } from '../config/retrieval.js';
+import { searchQueryForm } from '../agents/queryVariants.js';
+import type { SearchQueryForm, SearchVariant } from '../agents/queryVariants.js';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -25,9 +26,11 @@ export function buildHnUrl(
   hitsPerPage: number,
   tags = '(story,ask_hn,show_hn)',
   page = 0,
+  form: SearchQueryForm = 'quoted',
 ): string {
   const url = new URL(HN_ENDPOINT);
-  url.searchParams.set('query', `"${keyword.replaceAll('"', '').trim()}"`);
+  const phrase = keyword.replaceAll('"', '').trim();
+  url.searchParams.set('query', form === 'quoted' && searchQueryForm(phrase) === 'quoted' ? `"${phrase}"` : phrase);
   url.searchParams.set('tags', tags);
   url.searchParams.set('numericFilters', `created_at_i>${sinceUnix}`);
   url.searchParams.set('hitsPerPage', hitsPerPage.toString());
@@ -79,7 +82,12 @@ export function mapHit(hit: unknown): RawSignal | null {
     url: `https://news.ycombinator.com/item?id=${objectID}`,
     text,
     createdAt,
-    engagement: { score, comments }
+    engagement: { score, comments },
+    metadata: {
+      title: isComment ? null : (typeof hit.title === 'string' ? hit.title : null),
+      tags,
+    },
+    contentCompleteness: isComment || (typeof hit.story_text === 'string' && hit.story_text.trim()) ? 'complete' : 'title_only',
   };
 }
 
@@ -97,11 +105,11 @@ export const hackerNewsAdapter: SourceAdapter = {
     });
     if (variants.length === 0) return { signals: [], status: 'skipped', error: 'No valid query variants' };
     const perVariantLimit = Math.max(5, Math.min(100, Math.ceil(query.maxResults / variants.length) * 3));
-    type RequestResult = { variant: SearchVariant; page: number; hits: unknown[]; nbPages: number; status: 'ok' | 'failed' };
-    const requests = variants.map((variant) => ({ variant, page: 0 }));
+    type RequestResult = { variant: SearchVariant; page: number; form: SearchQueryForm; hits: unknown[]; nbPages: number; status: 'ok' | 'failed' };
+    const requests = variants.map((variant) => ({ variant, page: 0, form: searchQueryForm(variant.phrase) }));
     let failedRequests = 0;
     let firstError: string | undefined;
-    const fetchPage = async ({ variant, page }: { variant: SearchVariant; page: number }): Promise<RequestResult> => {
+    const fetchPage = async ({ variant, page, form }: { variant: SearchVariant; page: number; form: SearchQueryForm }): Promise<RequestResult> => {
       const startedAt = ctx.now().getTime();
       let httpStatus: number | null = null;
       let itemsReturned = 0;
@@ -111,7 +119,7 @@ export const hackerNewsAdapter: SourceAdapter = {
       let hits: unknown[] = [];
       let nbHits: number | null = null;
       let nbPages = 0;
-      const url = new URL(buildHnUrl(variant.phrase, sinceUnix, perVariantLimit, '(story,ask_hn,show_hn)', page));
+      const url = new URL(buildHnUrl(variant.phrase, sinceUnix, perVariantLimit, '(story,ask_hn,show_hn)', page, form));
       const request = { endpoint: HN_ENDPOINT, params: Object.fromEntries(url.searchParams.entries()) };
       try {
         const response = await fetchWithRetry(ctx.fetch, url.toString(), {
@@ -145,7 +153,7 @@ export const hackerNewsAdapter: SourceAdapter = {
         try {
           ctx.onRequest?.({
             source: 'hackernews',
-            label: `${variant.category}: ${variant.phrase}`,
+            label: `${variant.category} (${form}): ${variant.phrase}`,
             status: requestStatus,
             httpStatus,
             durationMs: Math.max(0, ctx.now().getTime() - startedAt),
@@ -159,9 +167,9 @@ export const hackerNewsAdapter: SourceAdapter = {
               page,
               pagesAvailable: nbPages,
               returned: itemsReturned,
-              sampleTitles: hits.slice(0, 3).flatMap((hit) => {
-                const title = isRecord(hit) ? hit.title : null;
-                return typeof title === 'string' ? [title.slice(0, 120)] : [];
+              sampleTitles: hits.slice(0, 5).flatMap((hit) => {
+                const title = isRecord(hit) ? (typeof hit.title === 'string' ? hit.title : hit.comment_text) : null;
+                return typeof title === 'string' ? [htmlToText(title).slice(0, 120)] : [];
               }),
             },
           });
@@ -169,20 +177,43 @@ export const hackerNewsAdapter: SourceAdapter = {
           // Request logging must not change adapter behavior.
         }
       }
-      return { variant, page, hits, nbPages, status: requestStatus };
+      return { variant, page, form, hits, nbPages, status: requestStatus };
     };
 
     const firstPages = await mapWithConcurrency(requests, 3, fetchPage);
-    const followups = firstPages.flatMap((outcome) =>
+    const primaryFollowups = firstPages.flatMap((outcome) =>
       outcome.status === 'ok' && outcome.page + 1 < Math.min(outcome.nbPages, HN_MAX_PAGES_PER_VARIANT)
-        ? [{ variant: outcome.variant, page: outcome.page + 1 }]
+        ? [{ variant: outcome.variant, page: outcome.page + 1, form: outcome.form }]
         : [],
     );
-    const laterPages = await mapWithConcurrency(followups, 3, fetchPage);
-    const outcomes = [...firstPages, ...laterPages];
+    const primaryLaterPages = await mapWithConcurrency(primaryFollowups, 3, fetchPage);
+    const primaryOutcomes = [...firstPages, ...primaryLaterPages];
+    const fallbackVariants = variants.filter((variant) => {
+      if (searchQueryForm(variant.phrase) !== 'quoted') return false;
+      const queryOutcomes = primaryOutcomes.filter((outcome) => outcome.variant.phrase === variant.phrase);
+      if (!queryOutcomes.some((outcome) => outcome.status === 'ok')) return false;
+      const ids = new Set(queryOutcomes
+        .flatMap((outcome) => outcome.hits).map(mapHit)
+        .filter((signal): signal is RawSignal => signal !== null).map((signal) => signal.externalId));
+      return ids.size < MIN_RESULTS_BEFORE_UNQUOTED_FALLBACK;
+    }).slice(0, MAX_HN_QUERY_VARIANTS);
+    let fallbackOutcomes: RequestResult[] = [];
+    if (fallbackVariants.length > 0 && primaryOutcomes.some((outcome) => outcome.status === 'ok')) {
+      const fallbackRequests = fallbackVariants.map((variant) => ({ variant, page: 0, form: 'all_words' as const }));
+      const fallbackFirstPages = await mapWithConcurrency(fallbackRequests, 3, fetchPage);
+      const fallbackFollowups = fallbackFirstPages.flatMap((outcome) =>
+        outcome.status === 'ok' && outcome.page + 1 < Math.min(outcome.nbPages, HN_MAX_PAGES_PER_VARIANT)
+          ? [{ variant: outcome.variant, page: outcome.page + 1, form: outcome.form }]
+          : [],
+      );
+      const fallbackLaterPages = await mapWithConcurrency(fallbackFollowups, 3, fetchPage);
+      fallbackOutcomes = [...fallbackFirstPages, ...fallbackLaterPages];
+    }
+    const outcomes = [...primaryOutcomes, ...fallbackOutcomes];
 
-    function roundRobin(groups: unknown[][]): unknown[] {
-      const merged: unknown[] = [];
+    type HitQuery = { hit: unknown; phrase: string };
+    function roundRobin(groups: HitQuery[][]): HitQuery[] {
+      const merged: HitQuery[] = [];
       const maxLength = Math.max(0, ...groups.map((group) => group.length));
       for (let index = 0; index < maxLength; index++) {
         for (const group of groups) {
@@ -196,14 +227,14 @@ export const hackerNewsAdapter: SourceAdapter = {
     const groups = variants.map((variant) => outcomes
       .filter((outcome) => outcome.variant.category === variant.category && outcome.variant.phrase === variant.phrase)
       .sort((left, right) => left.page - right.page)
-      .flatMap((outcome) => outcome.hits));
+      .flatMap((outcome) => outcome.hits.map((hit) => ({ hit, phrase: variant.phrase }))));
     const seenIds = new Set<string>();
     const signals: RawSignal[] = [];
-    for (const hit of roundRobin(groups)) {
-      const mapped = mapHit(hit);
+    for (const item of roundRobin(groups)) {
+      const mapped = mapHit(item.hit);
       if (!mapped || seenIds.has(mapped.externalId)) continue;
       seenIds.add(mapped.externalId);
-      const parsed = RawSignalSchema.safeParse(mapped);
+      const parsed = RawSignalSchema.safeParse({ ...mapped, metadata: { ...mapped.metadata, queriesFound: [item.phrase] } });
       if (parsed.success) signals.push(parsed.data);
       if (signals.length >= query.maxResults) break;
     }

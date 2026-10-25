@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import dotenv from 'dotenv';
 import { performance } from 'node:perf_hooks';
-import { z } from 'zod';
-import { SellerProfileInputSchema, SOURCE_IDS } from '@vantage/shared';
+import { fileURLToPath } from 'node:url';
 import type { LeadLabel, RawSignal } from '@vantage/shared';
 import { buildSearchVariants } from '../agents/queryVariants';
 import { createClassifyStage } from '../agents/classifier';
@@ -14,20 +13,9 @@ import { runScout } from '../agents/scout';
 import { contentHash } from '../utils/hash';
 import type { DecisionRow, DecisionStore, RunSignalContext } from '../db/decisions';
 import { assessRecall } from '../evaluation/recall';
-
-const EvalConfigSchema = z.object({
-  seller: SellerProfileInputSchema,
-  search: z.object({
-    keywords: z.array(z.string().min(1)).min(1),
-    sinceDays: z.number().int().min(1).max(1095),
-    maxResults: z.number().int().min(1).max(100).default(50),
-    sources: z.array(z.enum(SOURCE_IDS)).default(['hackernews', 'stackexchange']),
-  }),
-  expected: z.array(z.object({
-    title: z.string().min(1).optional(),
-    url: z.string().url().optional(),
-  }).refine((entry) => Boolean(entry.title || entry.url), 'Provide a title or URL')).min(1),
-});
+import { formatVerboseRequest } from '../evaluation/verboseRequests';
+import { resolveCliPath } from '../utils/cliPath';
+import { PRODUCTION_MAX_LOOKBACK_DAYS, EvalRecallConfigSchema } from '../evaluation/recallConfig';
 
 function cosine(left: number[], right: number[]): number {
   const dot = left.reduce((sum, value, index) => sum + value * (right[index] ?? 0), 0);
@@ -37,19 +25,35 @@ function cosine(left: number[], right: number[]): number {
 }
 
 async function main(): Promise<void> {
-  const inputPath = process.argv[2];
-  if (!inputPath) throw new Error('Usage: npm run eval:recall -- <expected-threads.json>');
-  const source = readFileSync(resolve(inputPath), 'utf8');
-  const parsed = EvalConfigSchema.safeParse(JSON.parse(source) as unknown);
+  dotenv.config({ path: fileURLToPath(new URL('../../../../.env', import.meta.url)) });
+  const args = process.argv.slice(2);
+  const verbose = args.includes('--verbose');
+  const inputPath = args.find((argument) => argument !== '--verbose');
+  if (!inputPath) throw new Error('Usage: npm run eval:recall -- <expected-threads.json> [--verbose]');
+  const source = readFileSync(resolveCliPath(inputPath), 'utf8');
+  const parsed = EvalRecallConfigSchema.safeParse(JSON.parse(source) as unknown);
   if (!parsed.success) throw new Error(`Invalid recall configuration: ${parsed.error.issues.map((issue) => issue.message).join('; ')}`);
   const config = parsed.data;
   const started = performance.now();
   const adapters = getEnabledAdapters().filter((adapter) => config.search.sources.includes(adapter.id));
   const variants = buildSearchVariants({ seller: config.seller, keywords: config.search.keywords, maxVariants: 8 });
+  if (verbose) {
+    const cutoff = new Date(Date.now() - config.search.sinceDays * 86400_000).toISOString().slice(0, 10);
+    const evalOnly = config.search.sinceDays > PRODUCTION_MAX_LOOKBACK_DAYS
+      ? ` (eval-only; production limit is ${PRODUCTION_MAX_LOOKBACK_DAYS} days)`
+      : '';
+    console.log(`Lookback: ${config.search.sinceDays} days${evalOnly}; source cutoff ${cutoff}`);
+    console.log('Generated query variants:');
+    for (const variant of variants) console.log(`- ${variant.category}: ${variant.phrase}`);
+  }
+  const adapterContext = defaultAdapterContext();
   const result = await runScout({
     adapters,
     query: { ...config.search, variants, seller: config.seller },
-    ctx: defaultAdapterContext(),
+    ctx: {
+      ...adapterContext,
+      ...(verbose ? { onRequest: (record) => console.log(formatVerboseRequest(record)) } : {}),
+    },
   });
   const signals = result.signals;
   const profileText = [config.seller.problemDescription, config.seller.idealCustomer ?? '', ...config.seller.competitors, ...config.search.keywords]

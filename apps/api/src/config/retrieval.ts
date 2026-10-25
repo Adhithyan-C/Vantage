@@ -1,7 +1,12 @@
 export const MAX_HN_QUERY_VARIANTS = 8;
 export const MAX_STACKEXCHANGE_QUERY_VARIANTS = 8;
+export const MAX_GITHUB_QUERY_VARIANTS = 4;
+export const GITHUB_MAX_PAGES_PER_VARIANT = 2;
+export const MAX_DEVTO_QUERY_VARIANTS = 4;
+export const DEVTO_MAX_PAGES_PER_VARIANT = 2;
 export const HN_MAX_PAGES_PER_VARIANT = 2;
 export const STACKEXCHANGE_MAX_PAGES_PER_VARIANT = 2;
+export const MIN_RESULTS_BEFORE_UNQUOTED_FALLBACK = 10;
 export const STACKEXCHANGE_DEFAULT_SITES = ['softwarerecs', 'softwareengineering'] as const;
-export const RELEVANCE_THRESHOLD = 0.36;
+export const RELEVANCE_THRESHOLD = 0.3;
 export const RELEVANCE_MAX_CLASSIFY_PER_RUN = 40;

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRelevanceStage, scoreRelevance } from '../src/agents/relevance';
+import { RELEVANCE_MAX_CLASSIFY_PER_RUN } from '../src/config/retrieval';
 import type { SellerProfileInput } from '@vantage/shared';
 import type { DecisionRow, DecisionStore, RunSignalContext } from '../src/db/decisions';
 
@@ -27,6 +28,18 @@ describe('scoreRelevance', () => {
     const result = await scoreRelevance(seller, signals, embed, { threshold: 0.3, maxClassifyPerRun: 1 });
     expect(result.eligibleIds).toEqual(['off-topic']);
     expect(result.excluded).toBe(1);
+  });
+
+  it('sends at most the configured forty of a 136-post collection past the relevance gate', async () => {
+    const collected = Array.from({ length: 136 }, (_, index) => ({ ...signals[0]!, id: `signal-${index}` }));
+    const embed = vi.fn(async (texts: string[]) => texts.map(() => [1, 0]));
+    const result = await scoreRelevance(seller, collected, embed, {
+      threshold: 0.3,
+      maxClassifyPerRun: RELEVANCE_MAX_CLASSIFY_PER_RUN,
+    });
+    expect(RELEVANCE_MAX_CLASSIFY_PER_RUN).toBe(40);
+    expect(result).toMatchObject({ total: 136, eligible: 40, excluded: 96 });
+    expect(result.eligibleIds).toHaveLength(40);
   });
 
   it('persists a score, threshold and eligibility fact for every signal using the fake embedder', async () => {

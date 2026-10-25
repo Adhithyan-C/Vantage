@@ -12,7 +12,7 @@
       "error grouping",
       "affordable error monitoring"
     ],
-    "sinceDays": 1095,
+    "sinceDays": 3650,
     "maxResults": 100,
     "sources": ["hackernews", "stackexchange"]
   },

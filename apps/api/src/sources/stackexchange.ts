@@ -4,13 +4,14 @@ import type { AdapterContext, AdapterResult, SourceAdapter, SourceQuery } from '
 import { htmlToText } from '../utils/text.js';
 import { fetchWithRetry } from '../utils/rateLimit.js';
 import { sanitizeRequestError } from '../utils/redact.js';
-import { buildSearchVariants } from '../agents/queryVariants.js';
+import { buildSearchVariants, searchQueryForm } from '../agents/queryVariants.js';
 import {
   MAX_STACKEXCHANGE_QUERY_VARIANTS,
+  MIN_RESULTS_BEFORE_UNQUOTED_FALLBACK,
   STACKEXCHANGE_DEFAULT_SITES,
   STACKEXCHANGE_MAX_PAGES_PER_VARIANT,
 } from '../config/retrieval.js';
-import type { SearchVariant } from '../agents/queryVariants.js';
+import type { SearchQueryForm, SearchVariant } from '../agents/queryVariants.js';
 
 const STACK_EXCHANGE_ENDPOINT = 'https://api.stackexchange.com/2.3/search/advanced';
 
@@ -74,6 +75,8 @@ export function mapQuestion(item: unknown, site: string): RawSignal | null {
         score: typeof question.score === 'number' ? question.score : undefined,
         comments: typeof question.answer_count === 'number' ? question.answer_count : undefined,
       },
+      metadata: { title },
+      contentCompleteness: body ? 'complete' as const : 'title_only' as const,
     };
     const parsed = RawSignalSchema.safeParse(mapped);
     return parsed.success ? parsed.data : null;
@@ -124,14 +127,14 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
       if (variants.length === 0) return { signals: [], status: 'skipped', error: 'No valid query variants' };
       const perVariantPageSize = Math.min(100, Math.max(5, Math.ceil(query.maxResults / variants.length) * 2));
       const fromDate = Math.floor(ctx.now().getTime() / 1000) - query.sinceDays * 86400;
-      const candidates: Array<{ site: string; variant: SearchVariant; page: number; signals: RawSignal[]; hasMore: boolean }> = [];
+      const candidates: Array<{ site: string; variant: SearchVariant; form: SearchQueryForm; page: number; signals: RawSignal[]; hasMore: boolean }> = [];
       const successfulRequests = { count: 0 };
       let failedRequests = 0;
       let firstError: string | undefined;
       let stopError: string | undefined;
-      const firstPages = sites.flatMap((site) => variants.map((variant) => ({ site, variant, page: 1 })));
+      const firstPages = sites.flatMap((site) => variants.map((variant) => ({ site, variant, page: 1, form: searchQueryForm(variant.phrase) })));
 
-      async function fetchPage(site: string, variant: SearchVariant, page: number, hasPotentialNext: boolean): Promise<void> {
+      async function fetchPage(site: string, variant: SearchVariant, page: number, hasPotentialNext: boolean, form: SearchQueryForm): Promise<void> {
         const startedAt = ctx.now().getTime();
         let response: Response | null = null;
         let body: unknown = null;
@@ -143,7 +146,7 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
         let hasMore = false;
         let outcome: NonNullable<RequestRecord['outcome']> = 'failed';
         const params: Record<string, string> = {
-          q: variant.phrase,
+          q: form === 'quoted' && searchQueryForm(variant.phrase) === 'quoted' ? `"${variant.phrase.replaceAll('"', '').trim()}"` : variant.phrase.replaceAll('"', '').trim(),
           site,
           sort: 'relevance',
           order: 'desc',
@@ -187,9 +190,9 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
             outcome = itemsReturned === 0 ? 'no_results' : 'success';
             const mapped = body.items.flatMap((item) => {
               const signal = mapQuestion(item, site);
-              return signal ? [signal] : [];
+              return signal ? [{ ...signal, metadata: { ...signal.metadata, queriesFound: [variant.phrase] } }] : [];
             });
-            candidates.push({ site, variant, page, signals: mapped, hasMore });
+            candidates.push({ site, variant, form, page, signals: mapped, hasMore });
           }
         } catch (err: unknown) {
           requestFailed = true;
@@ -207,7 +210,7 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
         try {
           ctx.onRequest?.({
             source: 'stackexchange',
-            label: `${site} · ${variant.category}: ${variant.phrase} · page ${page}`,
+            label: `${site} · ${variant.category} (${form}): ${variant.phrase} · page ${page}`,
             status: requestFailed ? 'failed' : 'ok',
             httpStatus: response?.status ?? null,
             durationMs: Math.max(0, ctx.now().getTime() - startedAt),
@@ -225,7 +228,7 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
               errorId: isRecord(body) && typeof body.error_id === 'number' ? body.error_id : null,
               errorName: isRecord(body) && typeof body.error_name === 'string' ? body.error_name : null,
               errorMessage: isRecord(body) && typeof body.error_message === 'string' ? sanitizeRequestError(body.error_message.slice(0, 160)) : null,
-              sampleTitles: isRecord(body) && Array.isArray(body.items) ? body.items.slice(0, 3).flatMap((item) => {
+              sampleTitles: isRecord(body) && Array.isArray(body.items) ? body.items.slice(0, 5).flatMap((item) => {
                 const title = isRecord(item) ? item.title : null;
                 return typeof title === 'string' ? [htmlToText(title).slice(0, 120)] : [];
               }) : [],
@@ -256,7 +259,7 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
       for (const [index, request] of firstPages.entries()) {
         if (stopError) break;
         const hasPotentialNext = index < firstPages.length - 1;
-        await fetchPage(request.site, request.variant, request.page, hasPotentialNext);
+        await fetchPage(request.site, request.variant, request.page, hasPotentialNext, request.form);
       }
       if (!stopError) {
         const laterPages = candidates.filter((candidate) => candidate.hasMore);
@@ -265,7 +268,33 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
           const siteCount = candidates.filter((item) => item.site === candidate.site).flatMap((item) => item.signals).length;
           if (siteCount >= query.maxResults) continue;
           await fetchPage(candidate.site, candidate.variant, candidate.page + 1,
-            index < laterPages.length - 1 || candidate.page + 1 < STACKEXCHANGE_MAX_PAGES_PER_VARIANT);
+            index < laterPages.length - 1 || candidate.page + 1 < STACKEXCHANGE_MAX_PAGES_PER_VARIANT, candidate.form);
+        }
+      }
+
+      const primarySignalCount = new Set(candidates
+        .filter((candidate) => candidate.form === 'quoted')
+        .flatMap((candidate) => candidate.signals)
+        .map((signal) => signal.externalId)).size;
+      const fallbackRequests = firstPages.filter((request) => {
+        if (request.form !== 'quoted') return false;
+        const matching = candidates.filter((candidate) => candidate.site === request.site && candidate.variant.phrase === request.variant.phrase && candidate.form === 'quoted');
+        const successful = matching.length > 0;
+        const count = new Set(matching.flatMap((candidate) => candidate.signals).map((signal) => signal.externalId)).size;
+        return successful && count < MIN_RESULTS_BEFORE_UNQUOTED_FALLBACK;
+      }).slice(0, MAX_STACKEXCHANGE_QUERY_VARIANTS);
+      if (successfulRequests.count > 0 && fallbackRequests.length > 0 && primarySignalCount < query.maxResults && !stopError) {
+        for (const [index, request] of fallbackRequests.entries()) {
+          if (stopError) break;
+          await fetchPage(request.site, request.variant, 1, index < fallbackRequests.length - 1, 'all_words');
+        }
+        if (!stopError) {
+          const fallbackPages = candidates.filter((candidate) => candidate.form === 'all_words' && candidate.hasMore);
+          for (const [index, candidate] of fallbackPages.entries()) {
+            if (stopError) break;
+            await fetchPage(candidate.site, candidate.variant, candidate.page + 1,
+              index < fallbackPages.length - 1 || candidate.page + 1 < STACKEXCHANGE_MAX_PAGES_PER_VARIANT, 'all_words');
+          }
         }
       }
 

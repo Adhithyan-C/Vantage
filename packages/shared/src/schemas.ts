@@ -12,6 +12,8 @@ export const RawSignalSchema = z.object({
   text: z.string().min(1),
   createdAt: isoDate,
   engagement: z.object({ score: z.number().optional(), comments: z.number().optional() }),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  contentCompleteness: z.enum(['complete', 'snippet', 'title_only']).optional(),
 });
 
 export const SellerProfileInputSchema = z.object({

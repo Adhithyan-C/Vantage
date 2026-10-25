@@ -1,4 +1,4 @@
-export const SOURCE_IDS = ['reddit', 'hackernews', 'devforums', 'snapshot', 'stackexchange'] as const;
+export const SOURCE_IDS = ['reddit', 'hackernews', 'devforums', 'snapshot', 'stackexchange', 'github', 'devto', 'producthunt'] as const;
 export const LEAD_LABELS = ['buyer_intent', 'competitor_complaint', 'venting', 'noise'] as const;
 export const CRITERION_IDS = ['states_problem', 'asks_for_recommendation', 'mentions_team_or_budget', 'shows_urgency', 'names_competitor'] as const;
 export const RUN_STATUSES = ['running', 'completed', 'completed_with_warnings', 'failed'] as const;

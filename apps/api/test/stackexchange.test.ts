@@ -77,7 +77,7 @@ describe('Stack Exchange adapter', () => {
     await adapter.search(query, makeContext(fetchFn));
     const url = urls[0];
     expect(url?.pathname).toBe('/2.3/search/advanced');
-    expect(url?.searchParams.get('q')).toBe('helpdesk');
+    expect(url?.searchParams.get('q')).toBe('"helpdesk"');
     expect(url?.searchParams.get('site')).toBe('softwarerecs');
     expect(url?.searchParams.get('sort')).toBe('relevance');
     expect(url?.searchParams.get('order')).toBe('desc');
@@ -119,10 +119,10 @@ describe('Stack Exchange adapter', () => {
       return jsonResponse(apiBody([question(Number(page))], { has_more: page === '1' }));
     };
     await createStackExchangeAdapter({ sites: ['softwarerecs'] }).search(query, makeContext(fetchFn));
-    expect(pages).toEqual(['1', '2']);
+    expect(pages).toEqual(['1', '2', '1', '2']);
   });
 
-  it('makes one request per keyword and site in site-then-keyword order', async () => {
+  it('makes quoted primary requests per keyword and site, then bounded all-words fallbacks', async () => {
     const urls: URL[] = [];
     let id = 0;
     const fetchFn: typeof fetch = async (input) => {
@@ -133,13 +133,14 @@ describe('Stack Exchange adapter', () => {
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs', 'stackoverflow'] });
     const variants = ['first', 'second'].map((phrase) => ({ category: 'problem' as const, phrase }));
     const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants }, makeContext(fetchFn));
-    expect(urls.map((url) => [url.searchParams.get('site'), url.searchParams.get('q')])).toEqual([
-      ['softwarerecs', 'first'],
-      ['softwarerecs', 'second'],
-      ['stackoverflow', 'first'],
-      ['stackoverflow', 'second'],
+    expect(urls.slice(0, 4).map((url) => [url.searchParams.get('site'), url.searchParams.get('q')])).toEqual([
+      ['softwarerecs', '"first"'],
+      ['softwarerecs', '"second"'],
+      ['stackoverflow', '"first"'],
+      ['stackoverflow', '"second"'],
     ]);
-    expect(result.signals).toHaveLength(4);
+    expect(urls.slice(4).every((url) => !(url.searchParams.get('q') ?? '').startsWith('"'))).toBe(true);
+    expect(result.signals).toHaveLength(8);
   });
 
   it('deduplicates question ids across keywords', async () => {
@@ -290,17 +291,17 @@ describe('Stack Exchange adapter', () => {
       sites: ['Bad', 'stackoverflow', 'bad site', 'softwarerecs', 'unix', 'askubuntu'],
     });
     await adapter.search({ ...query, keywords: ['one'] }, makeContext(fetchFn));
-    expect(requestedSites).toEqual(['stackoverflow', 'softwarerecs', 'unix']);
+    expect(requestedSites.slice(0, 3)).toEqual(['stackoverflow', 'softwarerecs', 'unix']);
   });
 
   it('records one request with site and keyword, raw item count and quota', async () => {
     const records: RequestRecord[] = [];
     const fetchFn: typeof fetch = async () => jsonResponse(apiBody([question()], { quota_remaining: 88 }));
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
-    await adapter.search(query, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
+    await adapter.search({ ...query, maxResults: 1 }, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ source: 'stackexchange', label: expect.stringContaining('problem: helpdesk'), status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: 88 });
-    expect(records[0]?.request).toMatchObject({ endpoint: 'https://api.stackexchange.com/2.3/search/advanced', params: { q: 'helpdesk', site: 'softwarerecs' } });
+    expect(records[0]).toMatchObject({ source: 'stackexchange', label: expect.stringContaining('problem (quoted): helpdesk'), status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: 88 });
+    expect(records[0]?.request).toMatchObject({ endpoint: 'https://api.stackexchange.com/2.3/search/advanced', params: { q: '"helpdesk"', site: 'softwarerecs' } });
     expect(JSON.stringify(records[0]?.request)).not.toContain('public-app-key');
     expect(records[0]?.responseSummary).toMatchObject({ returned: 1, hasMore: false, quotaRemaining: 88 });
     expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
@@ -314,5 +315,87 @@ describe('Stack Exchange adapter', () => {
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({ status: 'failed', httpStatus: 403, error: 'Stack Exchange request failed with status 403', quotaRemaining: null });
     expect(JSON.stringify(records)).not.toContain('private-key');
+  });
+
+  it('retries sparse quoted results with the same unquoted all-words query', async () => {
+    const queries: string[] = [];
+    const records: RequestRecord[] = [];
+    const requestUrls: URL[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      requestUrls.push(url);
+      const q = url.searchParams.get('q') ?? '';
+      queries.push(q);
+      return jsonResponse(apiBody(q === '"error tracking"' ? [] : [question(88)]));
+    };
+    const result = await createStackExchangeAdapter({ sites: ['softwarerecs'] }).search({
+      ...query, keywords: ['error tracking'], sinceDays: 1095,
+      variants: [{ category: 'problem', phrase: 'error tracking' }],
+    }, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
+    expect(queries).toEqual(['"error tracking"', 'error tracking']);
+    expect(requestUrls[0]?.searchParams.get('fromdate')).toBe(String(Math.floor(NOW.getTime() / 1000) - 1095 * 86400));
+    expect(result.signals).toHaveLength(1);
+    expect(records.map((record) => record.label)).toEqual([
+      'softwarerecs · problem (quoted): error tracking · page 1',
+      'softwarerecs · problem (all_words): error tracking · page 1',
+    ]);
+  });
+
+  it('retries a zero-hit query for its own site even when other site queries return many results', async () => {
+    const requests: Array<{ site: string; q: string }> = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      const site = url.searchParams.get('site') ?? '';
+      const q = url.searchParams.get('q') ?? '';
+      requests.push({ site, q });
+      const isSparseQuotedQuery = site === 'softwarerecs' && q === '"error tracking"';
+      const items = isSparseQuotedQuery ? [] : Array.from({ length: 10 }, (_, index) => question(index + 1));
+      return jsonResponse(apiBody(items));
+    };
+    const variants = [
+      { category: 'problem' as const, phrase: 'error tracking' },
+      { category: 'problem' as const, phrase: 'billing invoices' },
+    ];
+    await createStackExchangeAdapter({ sites: ['softwarerecs', 'softwareengineering'] }).search({
+      ...query, keywords: ['error tracking', 'billing invoices'], variants, maxResults: 100,
+    }, makeContext(fetchFn));
+    expect(requests).toEqual([
+      { site: 'softwarerecs', q: '"error tracking"' },
+      { site: 'softwarerecs', q: '"billing invoices"' },
+      { site: 'softwareengineering', q: '"error tracking"' },
+      { site: 'softwareengineering', q: '"billing invoices"' },
+      { site: 'softwarerecs', q: 'error tracking' },
+    ]);
+  });
+
+  it('sends phrases longer than five words unquoted on the primary request', async () => {
+    const urls: URL[] = [];
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      urls.push(new URL(String(input)));
+      return jsonResponse(apiBody([]));
+    };
+    await createStackExchangeAdapter({ sites: ['softwarerecs'] }).search({
+      ...query, keywords: ['monitoring options'], variants: [{
+        category: 'operational_pain', phrase: 'monitoring options for a medium-sized company',
+      }],
+    }, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
+    expect(urls[0]?.searchParams.get('q')).toBe('monitoring options for a medium-sized company');
+    expect(records[0]?.label).toContain('(all_words)');
+  });
+
+  it('caps all-words fallbacks at the configured Stack Exchange query limit', async () => {
+    const queries: string[] = [];
+    const variants = Array.from({ length: 10 }, (_, index) => ({ category: 'problem' as const, phrase: `query ${index}` }));
+    const fetchFn: typeof fetch = async (input) => {
+      queries.push(new URL(String(input)).searchParams.get('q') ?? '');
+      return jsonResponse(apiBody([]));
+    };
+    await createStackExchangeAdapter({ sites: ['softwarerecs', 'softwareengineering'] }).search({
+      ...query, keywords: ['query'], variants, maxResults: 100,
+    }, makeContext(fetchFn));
+    expect(queries).toHaveLength(24);
+    expect(queries.slice(0, 16).every((value) => value.startsWith('"'))).toBe(true);
+    expect(queries.slice(16).every((value) => !value.startsWith('"'))).toBe(true);
   });
 });

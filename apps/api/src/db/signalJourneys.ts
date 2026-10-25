@@ -42,7 +42,7 @@ export function createSignalJourneyStore(db: SupabaseClient): SignalJourneyStore
     if (linkError) throw dbError('getSignalJourney', linkError);
     if (!links?.length) return null;
     const [{ data: signal, error: signalError }, { data: decisions, error: decisionError }, { data: leads, error: leadError }, { data: events, error: eventError }, { data: themes, error: themeError }] = await Promise.all([
-      db.from('signals').select('id, source, url, author_handle, created_at_source, text_snapshot, community, engagement').eq('id', signalId).maybeSingle(),
+      db.from('signals').select('id, source, url, author_handle, created_at_source, text_snapshot, community, engagement, metadata, content_completeness').eq('id', signalId).maybeSingle(),
       db.from('decisions').select('agent, model, prompt_version, created_at, status, output, evidence_verified').eq('run_id', runId).eq('signal_id', signalId).order('created_at', { ascending: false }),
       db.from('leads').select('id, label, score, rank, score_breakdown').eq('run_id', runId).eq('signal_id', signalId).maybeSingle(),
       db.from('run_events').select('agent, kind, message, counts').eq('run_id', runId).order('id', { ascending: true }).limit(500),
@@ -120,8 +120,23 @@ export function createSignalJourneyStore(db: SupabaseClient): SignalJourneyStore
       label,
       score: typeof lead?.score === 'number' ? lead.score : null,
       stages: statuses,
+      ...(Object.keys(record(signal.metadata)).length > 0 ? { metadata: record(signal.metadata) } : {}),
+      ...(signal.content_completeness === 'complete' || signal.content_completeness === 'snippet' || signal.content_completeness === 'title_only'
+        ? { contentCompleteness: signal.content_completeness } : {}),
     };
-    const metadata = { source: signal.source, url: signal.url, authorHandle: signal.author_handle, community: signal.community, createdAtSource: signal.created_at_source, engagement: signal.engagement };
+    const sourceMetadata = record(signal.metadata);
+    const contentCompleteness = signal.content_completeness === 'complete' || signal.content_completeness === 'snippet' || signal.content_completeness === 'title_only'
+      ? signal.content_completeness : null;
+    const metadata = {
+      source: signal.source,
+      url: signal.url,
+      authorHandle: signal.author_handle,
+      community: signal.community,
+      createdAtSource: signal.created_at_source,
+      engagement: signal.engagement,
+      ...(Object.keys(sourceMetadata).length > 0 ? { sourceMetadata } : {}),
+      ...(contentCompleteness ? { contentCompleteness } : {}),
+    };
     const outputs: Record<SignalJourneyStage, Record<string, unknown> | null> = {
       scout: relevance ? { ...metadata, relevance: relevance.output } : metadata,
       classifier: classifier ? { ...classifier.output, model: classifier.model, promptVersion: classifier.promptVersion, status: classifier.status, evidenceVerified: latest('classifier')?.evidence_verified === true } : null,

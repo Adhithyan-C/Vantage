@@ -22,6 +22,18 @@ describe('DemoRunSchema', () => {
     expect(parsed.requests).toHaveLength(1);
   });
 
+  it('accepts GitHub/DEV source ids and optional source metadata in recorded demo views', () => {
+    const valid = fixture();
+    const parsed = DemoRunSchema.parse({
+      ...valid,
+      run: { ...valid.run, params: { ...valid.run.params, sources: ['github', 'devto'] } },
+      leads: [{ ...valid.leads[0], source: 'github', metadata: { title: 'An issue' }, contentCompleteness: 'complete' }],
+    });
+    expect(parsed.run.params.sources).toEqual(['github', 'devto']);
+    expect(parsed.leads[0]?.metadata).toEqual({ title: 'An issue' });
+    expect(parsed.leads[0]?.contentCompleteness).toBe('complete');
+  });
+
   it('rejects a missing field, unknown label, unsupported version, and missing detail', () => {
     const valid = fixture();
     const { run: missingRun, ...missing } = valid;

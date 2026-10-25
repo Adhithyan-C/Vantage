@@ -114,6 +114,8 @@ const LeadViewSchema = z.object({
   breakdown: ScoreBreakdownSchema,
   enrichment: EnrichmentSchema,
   criticTrace: DecisionTraceSchema.nullable().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  contentCompleteness: z.enum(['complete', 'snippet', 'title_only']).optional(),
 });
 
 const EvidenceSpanSchema = z.object({
@@ -185,6 +187,8 @@ const SignalRunSummarySchema = z.object({
   signalId: z.string(), leadId: z.string().nullable(), source: z.enum(SOURCE_IDS), authorHandle: z.string(), url: z.string(),
   textPreview: z.string(), createdAtSource: isoDate, label: z.enum(LEAD_LABELS).nullable(), score: z.number().nullable(),
   stages: z.object({ scout: SignalStageStatusSchema, classifier: SignalStageStatusSchema, critic: SignalStageStatusSchema, enricher: SignalStageStatusSchema, scorer: SignalStageStatusSchema, displacement: SignalStageStatusSchema, outcome: SignalStageStatusSchema }),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  contentCompleteness: z.enum(['complete', 'snippet', 'title_only']).optional(),
 });
 const SignalJourneySchema = SignalRunSummarySchema.extend({
   text: z.string(),

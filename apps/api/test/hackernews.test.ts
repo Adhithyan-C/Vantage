@@ -62,9 +62,9 @@ describe('Hacker News adapter', () => {
   });
 
   it('request URLs contain a quoted phrase, bounded type filters and a lookback', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
+    const fetchFn = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ hits: [] }), { status: 200 }));
     await hackerNewsAdapter.search({ keywords: ['k1'], sinceDays: 30, maxResults: 10 }, getCtx(fetchFn));
-    const normalUrl = String(fetchFn.mock.calls[1]![0]);
+    const normalUrl = String(fetchFn.mock.calls.find((call) => new URL(String(call[0])).searchParams.get('query') === '"k1 feature request"')?.[0]);
     const parsedUrl = new URL(normalUrl);
     expect(parsedUrl.searchParams.get('numericFilters')).toContain('created_at_i>');
     expect(parsedUrl.searchParams.get('tags')).toBe('(story,ask_hn,show_hn)');
@@ -98,16 +98,16 @@ describe('Hacker News adapter', () => {
 
   it('records one request with its keyword, raw item count, status and duration', async () => {
     const records: RequestRecord[] = [];
-    const fetchFn: typeof fetch = async () => new Response(JSON.stringify({ hits: [{ objectID: 'r', author: 'u', title: 'Valid title', created_at: '2026-10-01T00:00:00Z' }], nbHits: 1, nbPages: 1 }), { status: 200 });
+    const fetchFn: typeof fetch = async () => new Response(JSON.stringify({ hits: Array.from({ length: 10 }, (_, index) => ({ objectID: `r-${index}`, author: 'u', title: 'Valid title', created_at: '2026-10-01T00:00:00Z' })), nbHits: 10, nbPages: 1 }), { status: 200 });
     await hackerNewsAdapter.search({ keywords: ['billing'], sinceDays: 30, maxResults: 10, variants: [{ category: 'problem', phrase: 'billing' }] }, {
       ...getCtx(fetchFn), onRequest: (record) => records.push(record),
     });
     expect(records).toHaveLength(1);
-    expect(records[0]?.label).toContain('problem: billing');
-    expect(records.every((record) => record.status === 'ok' && record.itemsReturned === 1)).toBe(true);
+    expect(records[0]?.label).toContain('problem (quoted): billing');
+    expect(records.every((record) => record.status === 'ok' && record.itemsReturned === 10)).toBe(true);
     expect(records[0]).toMatchObject({ source: 'hackernews', httpStatus: 200, quotaRemaining: null });
     expect(records[0]?.request).toMatchObject({ endpoint: 'https://hn.algolia.com/api/v1/search', params: { query: '"billing"', tags: '(story,ask_hn,show_hn)' } });
-    expect(records[0]?.responseSummary).toMatchObject({ returned: 1, totalHits: 1, page: 0 });
+    expect(records[0]?.responseSummary).toMatchObject({ returned: 10, totalHits: 10, page: 0 });
     expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -121,12 +121,13 @@ describe('Hacker News adapter', () => {
   });
 
   it('uses capped phrase variants and HN type filters', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify({ hits: [] }), { status: 200 }));
+    const fetchFn = vi.fn().mockImplementation(async () => new Response(JSON.stringify({ hits: [] }), { status: 200 }));
     const variants = Array.from({ length: 10 }, (_, index) => ({ category: 'problem' as const, phrase: `phrase ${index}` }));
     await hackerNewsAdapter.search({ keywords: ['one', 'two', 'three'], sinceDays: 30, maxResults: 30, variants }, getCtx(fetchFn));
-    expect(fetchFn).toHaveBeenCalledTimes(8);
+    expect(fetchFn).toHaveBeenCalledTimes(16);
     const urls = fetchFn.mock.calls.map((call) => new URL(String(call[0])));
     expect(urls.map((url) => url.searchParams.get('query'))).toContain('"phrase 0"');
+    expect(urls.map((url) => url.searchParams.get('query'))).toContain('phrase 0');
     expect(urls.every((url) => url.searchParams.get('tags') === '(story,ask_hn,show_hn)')).toBe(true);
     expect(urls.every((url) => url.searchParams.get('page') === '0')).toBe(true);
   });
@@ -146,7 +147,7 @@ describe('Hacker News adapter', () => {
       keywords: ['error monitoring'], sinceDays: 1095, maxResults: 10,
       variants: [{ category: 'problem', phrase: 'error monitoring' }],
     }, getCtx(fetchFn));
-    expect(pages).toEqual(['0', '1']);
+    expect(pages).toEqual(['0', '1', '0', '1']);
     expect(result.signals.map((signal) => signal.externalId)).toEqual(['page-0', 'page-1']);
   });
 
@@ -212,13 +213,73 @@ describe('Hacker News adapter', () => {
     expect(result.signals[0]?.text).toBe('First version');
   });
 
-  it('request labels include the keyword and Ask HN suffix', async () => {
+  it('request labels record whether a query was quoted or an all-words fallback', async () => {
     const records: RequestRecord[] = [];
     const fetchFn: typeof fetch = async () => new Response(JSON.stringify({ hits: [] }), { status: 200 });
-    await hackerNewsAdapter.search({ keywords: ['kw'], sinceDays: 30, maxResults: 10, variants: [{ category: 'problem', phrase: 'kw' }] }, {
+    await hackerNewsAdapter.search({ keywords: ['two words'], sinceDays: 30, maxResults: 10, variants: [{ category: 'problem', phrase: 'two words' }] }, {
       ...getCtx(fetchFn), onRequest: (record) => records.push(record),
     });
-    expect(records.map((record) => record.label)).toEqual(['problem: kw']);
+    expect(records.map((record) => record.label)).toEqual(['problem (quoted): two words', 'problem (all_words): two words']);
+  });
+
+  it('retries only a sparse quoted query when another query has enough results', async () => {
+    const queries: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const query = new URL(String(input)).searchParams.get('query') ?? '';
+      queries.push(query);
+      const isSparseQuery = query.includes('error tracking');
+      const hits = isSparseQuery && query.startsWith('"') ? [] : Array.from({ length: 10 }, (_, index) => ({
+        objectID: `${query}-${index}`, author: 'user', title: 'A relevant error monitoring discussion', created_at: '2026-10-01T00:00:00Z',
+      }));
+      return new Response(JSON.stringify({ hits, nbPages: 1 }), { status: 200 });
+    };
+    await hackerNewsAdapter.search({
+      keywords: ['error tracking'], sinceDays: 30, maxResults: 100,
+      variants: [
+        { category: 'problem', phrase: 'error tracking' },
+        { category: 'operational_pain', phrase: 'error monitoring' },
+      ],
+    }, getCtx(fetchFn));
+    expect(queries).toEqual(['"error tracking"', '"error monitoring"', 'error tracking']);
+  });
+
+  it('retries sparse quoted results with the same unquoted query and records the form', async () => {
+    const records: RequestRecord[] = [];
+    const queries: string[] = [];
+    const requestUrls: URL[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const url = new URL(String(input));
+      requestUrls.push(url);
+      const query = url.searchParams.get('query') ?? '';
+      queries.push(query);
+      const hits = query === '"error tracking"' ? [] : [{ objectID: 'fallback-hit', author: 'user', title: 'Error tracking choices', created_at: '2026-10-01T00:00:00Z' }];
+      return new Response(JSON.stringify({ hits, nbPages: 1 }), { status: 200 });
+    };
+    const result = await hackerNewsAdapter.search({
+      keywords: ['error tracking'], sinceDays: 1095, maxResults: 10,
+      variants: [{ category: 'problem', phrase: 'error tracking' }],
+    }, { ...getCtx(fetchFn), onRequest: (record) => records.push(record) });
+    expect(queries).toEqual(['"error tracking"', 'error tracking']);
+    expect(result.signals.map((signal) => signal.externalId)).toEqual(['fallback-hit']);
+    expect(requestUrls[0]?.searchParams.get('numericFilters'))
+      .toBe(`created_at_i>${Math.floor(new Date('2026-10-01T00:00:00Z').getTime() / 1000) - 1095 * 86400}`);
+    expect(records[0]?.request?.params.numericFilters).toBe(requestUrls[0]?.searchParams.get('numericFilters'));
+    expect(records.map((record) => record.label)).toEqual(['problem (quoted): error tracking', 'problem (all_words): error tracking']);
+  });
+
+  it('sends phrases longer than five words unquoted on the primary request', async () => {
+    const queries: string[] = [];
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      queries.push(new URL(String(input)).searchParams.get('query') ?? '');
+      return new Response(JSON.stringify({ hits: [] }), { status: 200 });
+    };
+    await hackerNewsAdapter.search({
+      keywords: ['monitoring options'], sinceDays: 30, maxResults: 10,
+      variants: [{ category: 'operational_pain', phrase: 'monitoring options for a medium-sized company' }],
+    }, { ...getCtx(fetchFn), onRequest: (record) => records.push(record) });
+    expect(queries).toEqual(['monitoring options for a medium-sized company']);
+    expect(records[0]?.label).toContain('(all_words)');
   });
 
   it('one failed request among multiple degrades the result while all failed requests fail it', async () => {

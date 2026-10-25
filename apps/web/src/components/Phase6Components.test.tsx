@@ -88,11 +88,20 @@ describe('Phase 6 server-rendered components', () => {
     expect(setup).toContain('Use 2 to 5 short, specific phrases. Long lists dilute the results.');
     expect(setup).toContain('aria-describedby="source-stackexchange-hint" checked=""');
     expect(setup).toContain('Questions across Software Recommendations and Software Engineering.');
+    expect(setup).toContain('GitHub Issues');
+    expect(setup).toContain('Public issue search. GITHUB_TOKEN is optional and recommended');
+    expect(setup).toContain('DEV Community');
+    expect(setup).toContain('Unavailable until API use is permitted; its terms prohibit commercial use without permission');
+    expect(setup).not.toContain('id="source-github" type="checkbox" checked=""');
+    expect(setup).not.toContain('id="source-devto" type="checkbox" checked=""');
   });
 
   it('uses the explicit synthetic source label', () => {
     expect(SOURCE_LABEL.snapshot).toBe('Sample dataset (synthetic)');
     expect(SOURCE_LABEL.stackexchange).toBe('Stack Exchange');
+    expect(SOURCE_LABEL.github).toBe('GitHub Issues');
+    expect(SOURCE_LABEL.devto).toBe('DEV Community');
+    expect(SOURCE_LABEL.producthunt).toBe('Product Hunt');
   });
 
   it('shows Stack Exchange attribution in the shared footer', () => {

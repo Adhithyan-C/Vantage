@@ -9,8 +9,13 @@ describe('parseSourceSelection', () => {
 
   it('parses valid registered ids and removes duplicates', () => {
     expect(parseSourceSelection('hackernews, stackexchange,hackernews', [
-      'hackernews', 'snapshot', 'stackexchange',
+      'hackernews', 'snapshot', 'stackexchange', 'github', 'devto', 'producthunt',
     ])).toEqual({ sourceIds: ['hackernews', 'stackexchange'], error: null });
+  });
+
+  it('accepts the registered GitHub, DEV and Product Hunt ids', () => {
+    expect(parseSourceSelection('github,devto,producthunt', ['hackernews', 'github', 'devto', 'producthunt']))
+      .toEqual({ sourceIds: ['github', 'devto', 'producthunt'], error: null });
   });
 
   it('returns an error for an unknown id', () => {

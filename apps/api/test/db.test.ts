@@ -62,4 +62,26 @@ describe('toSignalRow', () => {
 
     expect(row.engagement).toBe(engagement);
   });
+
+  it('persists source metadata and content completeness', () => {
+    const row = toSignalRow({
+      source: 'github', externalId: '42', authorHandle: 'reporter',
+      url: 'https://github.com/example/project/issues/42', text: 'Issue title and body',
+      createdAt: '2026-10-01T00:00:00Z', engagement: { comments: 2 },
+      metadata: { title: 'Issue title', repository: 'example/project', queriesFound: ['error tracking'] },
+      contentCompleteness: 'complete',
+    });
+    expect(row.metadata).toEqual({ title: 'Issue title', repository: 'example/project', queriesFound: ['error tracking'] });
+    expect(row.content_completeness).toBe('complete');
+  });
+
+  it('uses empty metadata and complete content defaults for older source adapters', () => {
+    const row = toSignalRow({
+      source: 'hackernews', externalId: 'old', authorHandle: 'writer',
+      url: 'https://news.ycombinator.com/item?id=old', text: 'Legacy post',
+      createdAt: '2026-10-01T00:00:00Z', engagement: {},
+    });
+    expect(row.metadata).toEqual({});
+    expect(row.content_completeness).toBe('complete');
+  });
 });

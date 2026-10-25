@@ -16,6 +16,15 @@ describe('loadEnv', () => {
     expect(env.REDDIT_CLIENT_SECRET).toBe('secret123');
   });
 
+  it('accepts optional GitHub and Product Hunt source credentials', () => {
+    const env = loadEnv({
+      SUPABASE_URL: 'x', SUPABASE_SERVICE_ROLE_KEY: 'x', REDDIT_USER_AGENT: 'x',
+      GITHUB_TOKEN: 'github-token', PRODUCT_HUNT_TOKEN: 'product-hunt-token',
+    });
+    expect(env.GITHUB_TOKEN).toBe('github-token');
+    expect(env.PRODUCT_HUNT_TOKEN).toBe('product-hunt-token');
+  });
+
   it('all 4 required variables given: returns PORT 3001 and DEMO_MODE false', () => {
     const env = loadEnv({
       SUPABASE_URL: 'x',

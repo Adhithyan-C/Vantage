@@ -11,10 +11,14 @@ flowchart LR
   subgraph live[Live and sample sources]
     HN[Hacker News via Algolia]
     SE[Stack Exchange API v2.3]
+    GH[GitHub Issues]
+    DEV[DEV Community]
     Sample[Synthetic sample dataset]
   end
   HN --> Scout[Scout: fetch, normalize, deduplicate]
   SE --> Scout
+  GH --> Scout
+  DEV --> Scout
   Sample --> Scout
   Scout --> Classifier[Classifier: label and propose quotes]
   Classifier <--> LLM[Configured LLM provider]
@@ -32,7 +36,9 @@ flowchart LR
 ## Features available now
 
 - Search Hacker News through the free Algolia API. The footer attributes the search to Algolia.
-- Search Stack Exchange Software Recommendations questions through the official API; each result links to its original question and shows its author.
+- Search Software Recommendations and Software Engineering questions through the official Stack Exchange API; each result links to its original question and shows its author.
+- Search public GitHub issues (a `GITHUB_TOKEN` is optional and recommended for higher search limits) and DEV Community articles through Forem's documented article-search endpoint. GitHub and DEV results retain source metadata and search provenance.
+- Product Hunt is currently blocked and never sends API requests: its API terms prohibit commercial use without permission, so do not enable it until permitted use is confirmed.
 - Run the synthetic sample dataset for repeatable demonstrations and evaluation. The sample posts are labelled as sample data, have no real-post link, and ignore the search keywords.
 - Classify posts as buyer intent, competitor complaint, venting, or noise; verify proposed evidence quotes against stored post text and discard quotes that do not match.
 - Enrich signals and rank buyer-intent signals before competitor complaints. The Scorer is code; it computes scores from the configured weights, half-life, and engagement cap.
@@ -45,7 +51,7 @@ flowchart LR
 Requirements: Node.js 20 or later, as specified by the root `package.json` engines field, and npm. Install workspace dependencies with `npm install`.
 
 1. Copy `.env.example` to `.env`, then set the variable names listed in the environment table below. Do not commit `.env`.
-2. In the Supabase SQL editor, run [`0001_init.sql`](supabase/migrations/0001_init.sql), then [`0002_run_events_read_policy.sql`](supabase/migrations/0002_run_events_read_policy.sql), then [`seed.sql`](supabase/seed.sql).
+2. In the Supabase SQL editor, apply [`0001_init.sql`](supabase/migrations/0001_init.sql) through [`0005_signal_metadata.sql`](supabase/migrations/0005_signal_metadata.sql) in numeric order, then [`seed.sql`](supabase/seed.sql). Migration 0005 adds nullable content metadata fields and is required for GitHub/DEV persistence. Do not run the migrations through the app; an operator applies them manually.
 3. Start the API with `npm run dev:api` (port 3001 by default).
 4. Start the web app with `npm run dev:web`. The Vite server port is not set explicitly in `apps/web/vite.config.ts` (not verified here); it proxies `/api` to the API on port 3001.
 
@@ -72,7 +78,8 @@ Names and requiredness below come from `apps/api/src/config/env.ts`; purposes ar
 | `REDDIT_CLIENT_SECRET` | No | Reserved optional Reddit API credential; adapter not implemented. |
 | `STACKEXCHANGE_KEY` | No | Optional Stack Exchange application key; without one, the API has a lower daily quota. |
 | `STACKEXCHANGE_SITES` | No | Optional comma-separated Stack Exchange site IDs; defaults to `softwarerecs` and uses at most three valid IDs. |
-| `GITHUB_TOKEN` | No | Optional setting accepted for a future source; adapter not implemented. |
+| `GITHUB_TOKEN` | No | Optional GitHub REST token; improves the issue-search request limit. |
+| `PRODUCT_HUNT_TOKEN` | No | Optional Product Hunt developer token; retrieval remains blocked until permitted use is confirmed. |
 | `DEMO_MODE` | No | Selects recorded replay mode when set to `true`; defaults to live mode. |
 | `PORT` | No | API listening port; defaults to 3001. |
 
@@ -86,9 +93,11 @@ Set `DEMO_MODE` to `true` in `.env`, then start the API and web app with `npm ru
 
 Scripts verified for this project are `npm run typecheck`, `npm test -- --reporter=verbose --no-isolate --no-file-parallelism`, and `npm run build --workspace @vantage/web`.
 
-Root scripts: `npm run dev:api`, `npm run dev:web`, `npm run typecheck`, `npm test`, `npm run scout`, `npm run demo:record`, `npm run llm:check`, `npm run embed:check`, and `npm run eval:sample`. Workspace scripts include API `dev`, `typecheck`, `scout`, `demo:record`, `llm:check`, `embed:check`, and `eval:sample`; web `dev`, `build`, and `typecheck`; shared `typecheck`.
+Root scripts: `npm run dev:api`, `npm run dev:web`, `npm run typecheck`, `npm test`, `npm run scout`, `npm run demo:record`, `npm run llm:check`, `npm run embed:check`, `npm run eval:sample`, and `npm run eval:recall`. Workspace scripts include API `dev`, `typecheck`, `scout`, `demo:record`, `llm:check`, `embed:check`, `eval:sample`, and `eval:recall`; web `dev`, `build`, and `typecheck`; shared `typecheck`.
 
 The first displacement run downloads about 25 MB of quantized model files from Hugging Face and caches them under `.cache/transformers`; later runs use the cache. Run `npm run embed:check` to inspect the local embedding setup. Set `ENABLE_DISPLACEMENT=false` to disable theme generation.
+
+To evaluate known threads against live source retrieval, fill in [`fixtures/eval/github-dev-recall.json`](fixtures/eval/github-dev-recall.json), then run `npm run eval:recall -- fixtures/eval/github-dev-recall.json --verbose`. The included expected-thread titles are placeholders. Configure `GITHUB_TOKEN` in your local `.env` for the preferred GitHub search quota; DEV does not require a token. Product Hunt retrieval remains blocked pending confirmation of permitted API use.
 
 See [the evaluation](docs/EVALUATION.md) for the synthetic and informal live observations.
 
@@ -105,7 +114,7 @@ fixtures/   seller, synthetic posts, and recorded demo run
 docs/       demo script, evaluation, limitations and ethics
 ```
 
-Implemented phases reflected in the current architecture amendments: 1, 2A, 3A, 3B, 4, 4.1, 5, 6, 6.1, 7A, 7B, 8A, and 8B. Reddit, developer-forum and review-site adapters, Displacement and themes, the approach suggester, Monitor, authentication, broader row-level-security policies, deployment, accessibility audit, and load testing are not implemented. See [ARCHITECTURE.md](ARCHITECTURE.md) for design and phase details.
+Implemented phases reflected in the current architecture amendments include 12A retrieval improvements and 12B GitHub/DEV sources. Product Hunt is intentionally blocked pending permitted-use confirmation. Reddit, other developer-forum and review-site adapters, the approach suggester, Monitor, authentication, broader row-level-security policies, deployment, accessibility audit, and load testing are not implemented. See [ARCHITECTURE.md](ARCHITECTURE.md) for design and phase details.
 
 More documentation: [presentation script](docs/DEMO_SCRIPT.md), [evaluation](docs/EVALUATION.md), and [limitations and ethics](docs/LIMITATIONS_AND_ETHICS.md).
 

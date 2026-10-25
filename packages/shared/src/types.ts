@@ -70,6 +70,8 @@ export interface LeadView {
   breakdown: ScoreBreakdown;
   enrichment: Enrichment;
   criticTrace?: DecisionTrace | null;
+  metadata?: Record<string, unknown>;
+  contentCompleteness?: 'complete' | 'snippet' | 'title_only';
 }
 
 export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
@@ -240,6 +242,8 @@ export interface SignalRunSummary {
   label: LeadLabel | null;
   score: number | null;
   stages: Record<SignalJourneyStage, { status: SignalStageStatus; reason?: string }>;
+  metadata?: Record<string, unknown>;
+  contentCompleteness?: 'complete' | 'snippet' | 'title_only';
 }
 
 export interface SignalJourney extends SignalRunSummary {

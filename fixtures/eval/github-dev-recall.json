@@ -1,0 +1,19 @@
+{
+  "seller": {
+    "productName": "Replace with your product",
+    "problemDescription": "Replace with the customer problem your product solves",
+    "idealCustomer": "Replace with your ideal customer",
+    "competitors": []
+  },
+  "search": {
+    "keywords": ["replace with a specific problem phrase"],
+    "sinceDays": 365,
+    "maxResults": 50,
+    "sources": ["github", "devto"]
+  },
+  "expected": [
+    { "title": "REPLACE WITH EXPECTED GITHUB ISSUE OR DEV ARTICLE 1" },
+    { "title": "REPLACE WITH EXPECTED GITHUB ISSUE OR DEV ARTICLE 2" },
+    { "title": "REPLACE WITH EXPECTED GITHUB ISSUE OR DEV ARTICLE 3" }
+  ]
+}

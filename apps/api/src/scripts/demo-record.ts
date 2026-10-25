@@ -11,6 +11,7 @@ import { createRunStore } from '../db/runs';
 import { createThemeStore } from '../db/themes';
 import { createSignalJourneyStore } from '../db/signalJourneys';
 import { DemoRunSchema } from '../demo/schema';
+import { resolveCliPath } from '../utils/cliPath';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -60,7 +61,9 @@ async function main(): Promise<void> {
     return;
   }
   const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url));
-  const outPath = resolve(repoRoot, values.out ?? 'fixtures/demo-run.json');
+  const outPath = values.out
+    ? resolveCliPath(values.out, { purpose: 'output' })
+    : resolve(repoRoot, 'fixtures/demo-run.json');
   const db = createDb(getEnv());
   const runStore = createRunStore(db);
   const themeStore = createThemeStore(db);

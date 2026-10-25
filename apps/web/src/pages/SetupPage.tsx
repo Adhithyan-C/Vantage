@@ -32,6 +32,7 @@ const UNAVAILABLE_SOURCES: Array<{ label: string; note: string }> = [
   { label: 'Reddit', note: 'Not connected (waiting for API access)' },
   { label: 'Developer forums', note: 'Coming later' },
   { label: 'Review sites', note: 'Coming later' },
+  { label: 'Product Hunt', note: 'Unavailable until API use is permitted; its terms prohibit commercial use without permission' },
 ];
 
 function splitList(value: string): string[] {
@@ -390,6 +391,42 @@ export function SetupPage() {
                 </label>
                 <p className="muted field-hint" id="source-stackexchange-hint">
                   Questions across Software Recommendations and Software Engineering.
+                </p>
+              </div>
+              <span className="badge badge-live">Live</span>
+            </li>
+            <li className="source-row">
+              <div>
+                <label htmlFor="source-github">
+                  <input
+                    id="source-github"
+                    type="checkbox"
+                    checked={selectedSources.includes('github')}
+                    aria-describedby="source-github-hint"
+                    onChange={(event) => updateSource('github', event.target.checked)}
+                  />
+                  GitHub Issues
+                </label>
+                <p className="muted field-hint" id="source-github-hint">
+                  Public issue search. GITHUB_TOKEN is optional and recommended for a higher request limit.
+                </p>
+              </div>
+              <span className="badge badge-live">Live</span>
+            </li>
+            <li className="source-row">
+              <div>
+                <label htmlFor="source-devto">
+                  <input
+                    id="source-devto"
+                    type="checkbox"
+                    checked={selectedSources.includes('devto')}
+                    aria-describedby="source-devto-hint"
+                    onChange={(event) => updateSource('devto', event.target.checked)}
+                  />
+                  DEV Community
+                </label>
+                <p className="muted field-hint" id="source-devto-hint">
+                  Searches published DEV articles; the API response contains descriptions rather than full article bodies.
                 </p>
               </div>
               <span className="badge badge-live">Live</span>

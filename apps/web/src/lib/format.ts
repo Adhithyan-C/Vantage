@@ -6,6 +6,9 @@ export const SOURCE_LABEL: Record<SourceId, string> = {
   devforums: 'Developer forums',
   snapshot: 'Sample dataset (synthetic)',
   stackexchange: 'Stack Exchange',
+  github: 'GitHub Issues',
+  devto: 'DEV Community',
+  producthunt: 'Product Hunt',
 };
 
 export const EVENT_KIND_LABEL: Record<EventKind, string> = {
