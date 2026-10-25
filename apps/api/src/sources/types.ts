@@ -1,9 +1,13 @@
 import type { RawSignal, RequestRecord, SourceId } from '@vantage/shared';
+import type { SellerProfileInput } from '@vantage/shared';
+import type { SearchVariant } from '../agents/queryVariants.js';
 
 export interface SourceQuery {
   keywords: string[];
   sinceDays: number;
   maxResults: number;          // total cap per adapter call
+  seller?: SellerProfileInput;
+  variants?: SearchVariant[];
 }
 
 export interface AdapterContext {
@@ -13,6 +17,7 @@ export interface AdapterContext {
   timeoutMs: number;
   maxRetries: number;
   onRequest?: (record: RequestRecord) => void;
+  onRateLimitWait?: (source: SourceId, waitMs: number) => void | Promise<void>;
 }
 
 export interface AdapterResult {

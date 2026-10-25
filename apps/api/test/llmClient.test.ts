@@ -139,6 +139,22 @@ describe('createLlmClient resilience and configuration', () => {
     expect(sleeps).toEqual([1000]);
   });
 
+  it('reports rate-limit waits before sleeping while retaining the retry', async () => {
+    const { llm } = makeClient([
+      errorResponse(429, 'rate limited', '0.5'),
+      geminiResponse(JSON.stringify(valid)),
+    ], { order: ['gemini'] });
+    const waits: Array<[LlmProvider, number]> = [];
+    const result = await llm.generateJson({
+      system: 'system text',
+      prompt: 'prompt',
+      schema,
+      onRateLimitWait: (provider, waitMs) => { waits.push([provider, waitMs]); },
+    });
+    expect(result).toMatchObject({ ok: true, attempts: 2 });
+    expect(waits).toEqual([['gemini', 500]]);
+  });
+
   it('uses 2000 ms and 4000 ms fallback delays before provider fallback', async () => {
     const { llm, requests, sleeps } = makeClient([
       errorResponse(429),

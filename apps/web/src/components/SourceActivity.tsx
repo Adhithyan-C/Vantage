@@ -62,6 +62,9 @@ export function SourceActivity({
         {requests.map((request) => <li key={request.id}>
           <strong>{SOURCE_LABEL[request.source]}</strong> · {request.label} · {request.status === 'ok' ? 'OK' : request.status === 'failed' ? 'Failed' : 'Skipped'}
           {' · HTTP '}{request.httpStatus ?? '—'} · {request.durationMs} ms · {request.itemsReturned} items
+          {request.outcome && <p>Outcome: {request.outcome}</p>}
+          {request.request && <p>Request: <code>{request.request.endpoint}</code> {Object.entries(request.request.params).map(([key, value]) => `${key}=${value}`).join('&')}</p>}
+          {request.responseSummary && <p>Response summary: <code>{JSON.stringify(request.responseSummary)}</code></p>}
           {request.error && <p className="source-error">{request.error}</p>}
         </li>)}
       </ul>

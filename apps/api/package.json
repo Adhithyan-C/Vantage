@@ -10,7 +10,8 @@
     "demo:record": "tsx src/scripts/demo-record.ts",
     "llm:check": "tsx src/scripts/llm-check.ts",
     "embed:check": "tsx src/scripts/embed-check.ts",
-    "eval:sample": "tsx src/scripts/eval-sample.ts"
+    "eval:sample": "tsx src/scripts/eval-sample.ts",
+    "eval:recall": "tsx src/scripts/eval-recall.ts"
   },
   "dependencies": {
     "@huggingface/transformers": "4.3.1",

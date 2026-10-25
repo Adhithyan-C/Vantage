@@ -11,7 +11,7 @@ const run: RunView = {
   sources: [{ source: 'hackernews', status: 'ok', fetchedCount: 2, error: null }], signalCount: 2,
 };
 const requests: SourceRequestView[] = [
-  { id: 1, source: 'hackernews', label: 'helpdesk', status: 'ok', httpStatus: 200, durationMs: 20, itemsReturned: 4, error: null, quotaRemaining: null, createdAt: '2026-10-01T00:00:00Z' },
+  { id: 1, source: 'hackernews', label: 'helpdesk', status: 'ok', httpStatus: 200, durationMs: 20, itemsReturned: 4, error: null, quotaRemaining: null, outcome: 'success', request: { endpoint: 'https://hn.algolia.com/api/v1/search', params: { query: '"helpdesk"' } }, responseSummary: { returned: 4, totalHits: 4 }, createdAt: '2026-10-01T00:00:00Z' },
   { id: 2, source: 'hackernews', label: 'failed query', status: 'failed', httpStatus: 500, durationMs: 40, itemsReturned: 0, error: 'Temporary failure', quotaRemaining: null, createdAt: '2026-10-01T00:00:01Z' },
 ];
 
@@ -22,6 +22,8 @@ describe('SourceActivity', () => {
     expect(html).toContain('4<!-- --> items returned');
     expect(html).toContain('2<!-- --> signals kept');
     expect(html).toContain('Temporary failure');
+    expect(html).toContain('https://hn.algolia.com/api/v1/search');
+    expect(html).toContain('totalHits');
     expect(html.toLowerCase()).not.toContain('lead');
   });
 

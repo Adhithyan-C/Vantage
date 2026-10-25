@@ -70,6 +70,14 @@ const ScoreBreakdownSchema = z.object({
   total: z.number(),
 });
 
+const DecisionTraceSchema = z.object({
+  model: z.string().nullable(),
+  promptVersion: z.string().nullable(),
+  createdAt: isoDate,
+  status: z.string(),
+  output: z.record(z.string(), z.unknown()),
+});
+
 const EnrichmentSchema = z.object({
   ageDays: z.number(),
   commentCount: z.number(),
@@ -105,6 +113,7 @@ const LeadViewSchema = z.object({
   evidenceVerified: z.boolean(),
   breakdown: ScoreBreakdownSchema,
   enrichment: EnrichmentSchema,
+  criticTrace: DecisionTraceSchema.nullable().optional(),
 });
 
 const EvidenceSpanSchema = z.object({
@@ -120,13 +129,8 @@ const LeadDetailSchema = z.object({
   text: z.string(),
   evidence: z.array(EvidenceSpanSchema),
   discardedQuotes: z.number(),
-  trace: z.object({
-    model: z.string().nullable(),
-    promptVersion: z.string().nullable(),
-    createdAt: isoDate,
-    status: z.string(),
-    output: z.record(z.string(), z.unknown()),
-  }),
+  trace: DecisionTraceSchema,
+  criticTrace: DecisionTraceSchema.nullable().optional(),
 });
 
 const DemoEventSchema = z.object({
@@ -150,6 +154,9 @@ const SourceRequestSchema = z.object({
   itemsReturned: z.number(),
   error: z.string().nullable(),
   quotaRemaining: z.number().nullable(),
+  outcome: z.enum(['success', 'no_results', 'failed', 'rate_limited', 'unsupported_query', 'partial']).optional(),
+  request: z.object({ endpoint: z.string(), params: z.record(z.string(), z.string()) }).nullable().optional(),
+  responseSummary: z.record(z.string(), z.unknown()).nullable().optional(),
   createdAt: isoDate,
 });
 
@@ -170,6 +177,20 @@ const ThemeViewSchema = z.object({
   sampleData: z.boolean(),
 });
 
+const SignalStageStatusSchema = z.object({
+  status: z.enum(['completed', 'not_run', 'failed', 'not_available']),
+  reason: z.string().optional(),
+});
+const SignalRunSummarySchema = z.object({
+  signalId: z.string(), leadId: z.string().nullable(), source: z.enum(SOURCE_IDS), authorHandle: z.string(), url: z.string(),
+  textPreview: z.string(), createdAtSource: isoDate, label: z.enum(LEAD_LABELS).nullable(), score: z.number().nullable(),
+  stages: z.object({ scout: SignalStageStatusSchema, classifier: SignalStageStatusSchema, critic: SignalStageStatusSchema, enricher: SignalStageStatusSchema, scorer: SignalStageStatusSchema, displacement: SignalStageStatusSchema, outcome: SignalStageStatusSchema }),
+});
+const SignalJourneySchema = SignalRunSummarySchema.extend({
+  text: z.string(),
+  timeline: z.array(z.object({ stage: z.enum(['scout', 'classifier', 'critic', 'enricher', 'scorer', 'displacement', 'outcome']), status: z.enum(['completed', 'not_run', 'failed', 'not_available']), reason: z.string().nullable(), output: z.record(z.string(), z.unknown()).nullable() })),
+});
+
 export const DemoRunSchema = z.object({
   version: z.literal(1),
   recordedAt: isoDate,
@@ -180,6 +201,8 @@ export const DemoRunSchema = z.object({
   details: z.record(z.string(), LeadDetailSchema),
   requests: z.array(SourceRequestSchema).default([]),
   themes: z.array(ThemeViewSchema).default([]),
+  collectedSignals: z.array(SignalRunSummarySchema).optional(),
+  journeys: z.record(z.string(), SignalJourneySchema).optional(),
 }).refine(
   (fixture) => fixture.leads.every((lead) => Object.hasOwn(fixture.details, lead.leadId)),
   { message: 'Every recorded signal must have a detail entry', path: ['details'] },

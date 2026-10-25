@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { CriterionId, DecisionTrace, FeedbackAction, LeadDetail } from '@vantage/shared';
-import { ApiError, getLeadDetail, sendFeedback } from '../lib/api';
+import type { CriterionId, DecisionTrace, FeedbackAction, LeadDetail, SignalJourney } from '@vantage/shared';
+import { ApiError, getLeadDetail, getSignalJourney, sendFeedback } from '../lib/api';
 import { formatAge, LABEL_TEXT, SOURCE_LABEL } from '../lib/format';
 import { isRankedLabel } from '../lib/inbox';
 import { ErrorState } from '../components/ErrorState';
@@ -11,6 +11,7 @@ import { ScoreBreakdown } from '../components/ScoreBreakdown';
 import { ReasoningTrace } from '../components/ReasoningTrace';
 import { LoadingState } from '../components/LoadingState';
 import { ScoreMeter } from '../components/ScoreMeter';
+import { SignalJourneyTimeline } from '../components/SignalJourneyTimeline';
 
 const CRITERION_LABEL: Record<CriterionId, string> = {
   states_problem: 'States a problem',
@@ -54,23 +55,38 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
   const [notFound, setNotFound] = useState(false);
   const [pending, setPending] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [journey, setJourney] = useState<SignalJourney | null>(null);
+  const [journeyError, setJourneyError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     setNotFound(false);
     try {
-      setDetail(await getLeadDetail(leadId));
+      const result = await getLeadDetail(leadId);
+      setDetail(result);
+      try {
+        setJourney(await getSignalJourney(runId, result.lead.signalId));
+        setJourneyError(null);
+      } catch (err) {
+        setJourneyError(err instanceof Error ? err.message : String(err));
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        setNotFound(true);
+        try {
+          setJourney(await getSignalJourney(runId, leadId));
+          setJourneyError(null);
+        } catch (journeyErr) {
+          setNotFound(true);
+          setJourneyError(journeyErr instanceof Error ? journeyErr.message : String(journeyErr));
+        }
       } else {
         setError(err instanceof Error ? err.message : String(err));
       }
     } finally {
       setLoading(false);
     }
-  }, [leadId]);
+  }, [leadId, runId]);
 
   useEffect(() => { void load(); }, [load]);
 
@@ -88,6 +104,11 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
   }
 
   if (loading) return <LoadingState label="Loading signal" />;
+  if (!detail && journey) return <div className="stack">
+    <a className="back-link" href={`#/runs/${encodeURIComponent(runId)}`}>Back to run</a>
+    <section className="card stack"><p className="eyebrow">COLLECTED POST</p><h1 className="page-title">@{journey.authorHandle}</h1><p className="muted">{journey.source} · {journey.createdAtSource}</p><p><a href={journey.url} target="_blank" rel="noopener noreferrer">Open original post</a></p></section>
+    <SignalJourneyTimeline journey={journey} />
+  </div>;
   if (notFound) return <div className="stack"><a className="back-link" href={`#/runs/${encodeURIComponent(runId)}/signals`}>Back to inbox</a><EmptyState title="Signal not found" hint="This signal may have been removed from the run." action={{ label: 'Return to inbox', href: `#/runs/${encodeURIComponent(runId)}/signals` }} /></div>;
   if (error) return <ErrorState title="Could not load this signal" message={error} onRetry={() => void load()} />;
   if (!detail) return <EmptyState title="Signal not found" hint="Return to the inbox to choose another signal." action={{ label: 'Return to inbox', href: `#/runs/${encodeURIComponent(runId)}/signals` }} />;
@@ -127,6 +148,8 @@ export function SignalDetailPage({ runId, leadId }: { runId: string; leadId: str
         <h2 className="card-title" id="post-title">Post text</h2>
         <EvidenceQuote text={detail.text} spans={detail.evidence} />
       </section>
+      {journey && <SignalJourneyTimeline journey={journey} />}
+      {journeyError && <section className="card"><ErrorState title="Signal journey unavailable" message={journeyError} /></section>}
       <section className="card reasoning-block" id="classification-why" aria-labelledby="reasoning-title">
         <p className="eyebrow">CLASSIFIER EXPLANATION</p>
         <h2 className="card-title" id="reasoning-title">Reasoning</h2>

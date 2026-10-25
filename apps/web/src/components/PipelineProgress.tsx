@@ -156,6 +156,7 @@ export function agentSummary(events: RunEvent[], agent: 'enricher' | 'scorer'): 
 export function displacementStatus(run: RunView, events: RunEvent[]): string {
   const stageEvents = events.filter((event) => event.agent === 'displacement');
   if (stageEvents.length === 0) return run.status === 'running' ? 'Waiting' : 'Skipped';
+  if (stageEvents.some((event) => event.kind === 'info' && event.message.startsWith('Displacement skipped:'))) return 'Skipped';
   const final = [...stageEvents].reverse().find((event) =>
     event.message.startsWith('Found ') || event.message.startsWith('No competitor') || event.message.startsWith('Displacement failed'),
   );
@@ -174,7 +175,7 @@ export function displacementSummary(events: RunEvent[]): string {
   return `${typeof count === 'number' ? count : 0} themes`;
 }
 
-export function PipelineProgress({ run, events }: { run: RunView; events: RunEvent[] }) {
+export function PipelineProgress({ run, events, showStages = true }: { run: RunView; events: RunEvent[]; showStages?: boolean }) {
   const summary = scoutSummary(events);
   const scoutBadge = scoutStatus(run, events);
   const classifierInfo = classifierSummary(events);
@@ -189,11 +190,11 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
   const displacementInfo = displacementSummary(events);
 
   return (
-    <section className="card" aria-labelledby="pipeline-title">
-      <h2 id="pipeline-title" className="card-title">
+    <section className="card" aria-labelledby={showStages ? 'pipeline-title' : 'source-health-title'}>
+      {showStages && <h2 id="pipeline-title" className="card-title">
         Pipeline
-      </h2>
-      <ol className="stage-list">
+      </h2>}
+      {showStages && <ol className="stage-list">
         {STAGES.map((stage) => (
           <li key={stage.id} className={stage.built ? 'stage' : 'stage stage-planned'}>
             <div>
@@ -231,9 +232,9 @@ export function PipelineProgress({ run, events }: { run: RunView; events: RunEve
             )}
           </li>
         ))}
-      </ol>
+      </ol>}
 
-      <h3 className="card-subtitle">Sources</h3>
+      <h3 className="card-subtitle" id="source-health-title">Sources</h3>
       {run.sources.length === 0 ? (
         <p className="muted">Waiting for the first source to report.</p>
       ) : (

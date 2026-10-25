@@ -34,6 +34,7 @@ export interface LlmClient {
     system: string;
     prompt: string;
     schema: z.ZodType<T>;
+    onRateLimitWait?: (provider: LlmProvider, waitMs: number) => void | Promise<void>;
   }): Promise<LlmResult<T>>;
   getDisabledProviders(): LlmProvider[];
 }
@@ -265,6 +266,7 @@ export function createLlmClient({
     provider: LlmProvider,
     system: string,
     prompt: string,
+    onRateLimitWait?: (provider: LlmProvider, waitMs: number) => void | Promise<void>,
   ): Promise<{ result: ProviderResponse; attempts: number; errors: ProviderError[] }> {
     const errors: ProviderError[] = [];
     let attempts = 0;
@@ -281,7 +283,9 @@ export function createLlmClient({
       if (!retryable || retryIndex >= config.rateLimitRetries) {
         return { result, attempts, errors };
       }
-      await sleep(retryDelay(result.retryAfter, retryIndex));
+      const waitMs = retryDelay(result.retryAfter, retryIndex);
+      await onRateLimitWait?.(provider, waitMs);
+      await sleep(waitMs);
       retryIndex += 1;
     }
   }
@@ -297,10 +301,11 @@ export function createLlmClient({
     getDisabledProviders(): LlmProvider[] {
       return config.providerOrder.filter((provider) => disabledProviders.has(provider));
     },
-    async generateJson<T>({ system, prompt, schema }: {
+    async generateJson<T>({ system, prompt, schema, onRateLimitWait }: {
       system: string;
       prompt: string;
       schema: z.ZodType<T>;
+      onRateLimitWait?: (provider: LlmProvider, waitMs: number) => void | Promise<void>;
     }): Promise<LlmResult<T>> {
       const availableProviders = config.providerOrder.filter((provider) => {
         const hasKey = provider === 'gemini' ? Boolean(geminiApiKey) : Boolean(groqApiKey);
@@ -313,7 +318,7 @@ export function createLlmClient({
         let retryPrompt = prompt;
         let providerInvalid: { message: string } | null = null;
         for (let validationAttempt = 0; validationAttempt <= config.maxValidationRetries; validationAttempt += 1) {
-          const request = await requestWithRateRetries(provider, system, retryPrompt);
+          const request = await requestWithRateRetries(provider, system, retryPrompt, onRateLimitWait);
           attempts += request.attempts;
           providerErrors.push(...request.errors);
           if (request.result.failure) {

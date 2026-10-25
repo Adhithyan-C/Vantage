@@ -133,7 +133,7 @@ describe('runPipeline scoring integration', () => {
     const store = new PipelineStore();
     const score: ScoreStage = async () => { throw new Error('score store unavailable'); };
     await execute(store, { classify: async () => summary(), score });
-    expect(store.events.at(-2)).toMatchObject({
+    expect(store.events.find((event) => event.agent === 'scorer' && event.kind === 'error')).toMatchObject({
       agent: 'scorer',
       kind: 'error',
       message: 'Scoring failed: score store unavailable',
@@ -145,7 +145,7 @@ describe('runPipeline scoring integration', () => {
     const store = new PipelineStore();
     const score: ScoreStage = async () => ({ scored: 2, ranked: 0, topScore: null });
     await execute(store, { classify: async () => summary(), score });
-    expect(store.events.at(-2)).toMatchObject({
+    expect(store.events.find((event) => event.agent === 'scorer' && event.message === 'No buyer intent or competitor complaint signals in this run')).toMatchObject({
       agent: 'scorer',
       kind: 'info',
       message: 'No buyer intent or competitor complaint signals in this run',

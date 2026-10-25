@@ -4,6 +4,7 @@ import type { DecisionView } from '@vantage/shared';
 import type { LeadStore } from '../db/leads';
 import { DEMO_RUN_PARAMS, loadDemoSeller } from '../config/demo';
 import type { DecisionStore } from '../db/decisions';
+import type { SignalJourneyStore } from '../db/signalJourneys';
 import { runPipeline } from '../orchestrator/runPipeline';
 import type { PipelineDeps } from '../orchestrator/runPipeline';
 import { SSE_HEARTBEAT_MS, SSE_MAX_MS, SSE_TICK_MS } from '../config/stream';
@@ -15,7 +16,7 @@ function errorMessage(err: unknown): string {
 }
 
 export function createRunsRouter(
-  deps: PipelineDeps & { decisionStore?: DecisionStore; leadStore?: LeadStore },
+  deps: PipelineDeps & { decisionStore?: DecisionStore; leadStore?: LeadStore; signalJourneyStore?: SignalJourneyStore },
   streamTimings: { tickMs?: number; heartbeatMs?: number; maxMs?: number } = {},
 ): express.Router {
   const router = express.Router();
@@ -108,6 +109,65 @@ export function createRunsRouter(
       res.status(200).json({ events });
     } catch (err) {
       console.error(`GET /runs/:runId/events failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  router.get('/runs/:runId/signals', async (req, res) => {
+    try {
+      const runId = req.params.runId;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId)) {
+        res.status(400).json({ error: 'Invalid run id' });
+        return;
+      }
+      const limitValue = req.query.limit ?? '50';
+      const offsetValue = req.query.offset ?? '0';
+      if (typeof limitValue !== 'string' || !/^\d+$/.test(limitValue) || Number(limitValue) < 1 || Number(limitValue) > 100 ||
+        typeof offsetValue !== 'string' || !/^\d+$/.test(offsetValue) || !Number.isSafeInteger(Number(offsetValue))) {
+        res.status(400).json({ error: 'Invalid paging values' });
+        return;
+      }
+      const run = await store.getRun(runId);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      if (!deps.signalJourneyStore) {
+        res.status(500).json({ error: 'Internal error' });
+        return;
+      }
+      const result = await deps.signalJourneyStore.listRunSignals(runId, Number(limitValue), Number(offsetValue));
+      res.status(200).json(result);
+    } catch (err) {
+      console.error(`GET /runs/:runId/signals failed: ${errorMessage(err)}`);
+      res.status(500).json({ error: 'Internal error' });
+    }
+  });
+
+  router.get('/runs/:runId/signals/:signalId/trace', async (req, res) => {
+    try {
+      const { runId, signalId } = req.params;
+      if (typeof runId !== 'string' || !UUID_RE.test(runId) || typeof signalId !== 'string' || !UUID_RE.test(signalId)) {
+        res.status(400).json({ error: 'Invalid run or signal id' });
+        return;
+      }
+      const run = await store.getRun(runId);
+      if (!run) {
+        res.status(404).json({ error: 'Run not found' });
+        return;
+      }
+      if (!deps.signalJourneyStore) {
+        res.status(500).json({ error: 'Internal error' });
+        return;
+      }
+      const journey = await deps.signalJourneyStore.getSignalJourney(runId, signalId);
+      if (!journey) {
+        res.status(404).json({ error: 'Signal not found in this run' });
+        return;
+      }
+      res.status(200).json({ journey });
+    } catch (err) {
+      console.error(`GET /runs/:runId/signals/:signalId/trace failed: ${errorMessage(err)}`);
       res.status(500).json({ error: 'Internal error' });
     }
   });

@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DemoRunSchema } from '../src/demo/schema';
 import { createReplay } from '../src/demo/replay';
-import { detail, fixture, LEAD_ID, lead, RUN_ID } from './demoTestFixtures';
+import { detail, fixture, LEAD_ID, lead, RUN_ID, startedAt } from './demoTestFixtures';
+import type { SignalJourney, SignalRunSummary } from '@vantage/shared';
 
 function makeFixture() {
   const base = fixture();
@@ -98,5 +99,16 @@ describe('createReplay', () => {
     expect(await replay.themeStore.listThemes(RUN_ID)).toEqual(themed.themes);
     await expect(replay.themeStore.getThemeInputs(RUN_ID)).rejects.toThrow('Not available in demo mode');
     await expect(replay.themeStore.saveThemes(RUN_ID, [])).rejects.toThrow('Not available in demo mode');
+  });
+
+  it('replays optional collected signal summaries and their seven-entry journeys', async () => {
+    const names = ['scout', 'classifier', 'critic', 'enricher', 'scorer', 'displacement', 'outcome'] as const;
+    const stages = Object.fromEntries(names.map((stage) => [stage, { status: 'completed' as const }])) as SignalRunSummary['stages'];
+    const summary: SignalRunSummary = { signalId: 'raw-signal', leadId: null, source: 'hackernews', authorHandle: 'seller', url: 'https://example.test', textPreview: 'Post', createdAtSource: startedAt, label: null, score: null, stages };
+    const journey: SignalJourney = { ...summary, text: 'Full post', timeline: names.map((stage) => ({ stage, status: 'completed' as const, reason: null, output: {} })) };
+    const fixtureData = DemoRunSchema.parse({ ...fixture(), collectedSignals: [summary], journeys: { [summary.signalId]: journey } });
+    const replay = createReplay({ fixture: fixtureData });
+    expect(await replay.signalJourneyStore.listRunSignals(RUN_ID, 50, 0)).toEqual({ signals: [summary], total: 1 });
+    expect(await replay.signalJourneyStore.getSignalJourney(RUN_ID, summary.signalId)).toEqual(journey);
   });
 });

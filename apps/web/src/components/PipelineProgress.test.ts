@@ -133,6 +133,7 @@ describe('Displacement pipeline stage', () => {
     expect(displacementSummary([final])).toBe('2 themes');
     expect(displacementSummary([stageEvent('displacement', 'info', 'No competitor complaint signals to cluster', { complaintSignals: 0 })])).toBe('no complaints');
     expect(displacementStatus(run('completed'), [stageEvent('displacement', 'error', 'Displacement failed: offline')])).toBe('Failed');
+    expect(displacementStatus(run('completed'), [stageEvent('displacement', 'info', 'Displacement skipped: disabled by configuration', { skipped: true, reason: 'disabled by configuration' })])).toBe('Skipped');
   });
 
   it('renders Displacement as an active stage', () => {

@@ -1,4 +1,4 @@
-import type { CompetitorGraphView, FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
+import type { CompetitorGraphView, FeedbackAction, LeadDetail, LeadView, ReportView, RunCreateRequest, RunEvent, RunView, SignalJourney, SignalRunSummary, SourceRequestView, ThemeView } from '@vantage/shared';
 
 const BASE = '/api';
 
@@ -82,6 +82,16 @@ export async function getThemes(runId: string): Promise<ThemeView[]> {
 export async function getCompetitorGraph(runId: string): Promise<CompetitorGraphView> {
   const body = await request<{ graph: CompetitorGraphView }>(`/runs/${encodeURIComponent(runId)}/competitor-graph`);
   return body.graph;
+}
+
+export async function getRunSignals(runId: string, limit = 100, offset = 0): Promise<{ signals: SignalRunSummary[]; total: number }> {
+  const query = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+  return request<{ signals: SignalRunSummary[]; total: number }>(`/runs/${encodeURIComponent(runId)}/signals?${query.toString()}`);
+}
+
+export async function getSignalJourney(runId: string, signalId: string): Promise<SignalJourney> {
+  const body = await request<{ journey: SignalJourney }>(`/runs/${encodeURIComponent(runId)}/signals/${encodeURIComponent(signalId)}/trace`);
+  return body.journey;
 }
 
 export async function getEvents(runId: string, after: number): Promise<RunEvent[]> {

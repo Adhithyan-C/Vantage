@@ -1,12 +1,18 @@
 import { RawSignalSchema } from '@vantage/shared';
-import type { RawSignal } from '@vantage/shared';
+import type { RawSignal, RequestRecord } from '@vantage/shared';
 import type { AdapterContext, AdapterResult, SourceAdapter, SourceQuery } from './types.js';
 import { htmlToText } from '../utils/text.js';
 import { fetchWithRetry } from '../utils/rateLimit.js';
 import { sanitizeRequestError } from '../utils/redact.js';
+import { buildSearchVariants } from '../agents/queryVariants.js';
+import {
+  MAX_STACKEXCHANGE_QUERY_VARIANTS,
+  STACKEXCHANGE_DEFAULT_SITES,
+  STACKEXCHANGE_MAX_PAGES_PER_VARIANT,
+} from '../config/retrieval.js';
+import type { SearchVariant } from '../agents/queryVariants.js';
 
 const STACK_EXCHANGE_ENDPOINT = 'https://api.stackexchange.com/2.3/search/advanced';
-const DEFAULT_SITE = 'softwarerecs';
 
 interface StackExchangeAdapterOptions {
   key?: string;
@@ -34,7 +40,7 @@ function configuredSites(sites: string[] | undefined): string[] {
   const unique = [...new Set(values
     .map((site) => site.trim())
     .filter((site) => /^[a-z0-9.]+$/.test(site)))];
-  return unique.length > 0 ? unique.slice(0, 3) : [DEFAULT_SITE];
+  return unique.length > 0 ? unique.slice(0, 3) : [...STACKEXCHANGE_DEFAULT_SITES];
 }
 
 export function mapQuestion(item: unknown, site: string): RawSignal | null {
@@ -109,104 +115,132 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
       if (query.keywords.length === 0) {
         return { signals: [], status: 'skipped', error: 'No keywords provided' };
       }
-
-      const signals: RawSignal[] = [];
       const key = options.key ?? process.env.STACKEXCHANGE_KEY;
       const sites = configuredSites(options.sites);
-      const seenIds = new Set<string>();
-      let attempted = 0;
+      const seller = query.seller ?? { productName: query.keywords[0] ?? 'Product', problemDescription: query.keywords.join(' '), competitors: [] };
+      const variants: SearchVariant[] = query.variants?.slice(0, MAX_STACKEXCHANGE_QUERY_VARIANTS) ?? buildSearchVariants({
+        seller, keywords: query.keywords, maxVariants: MAX_STACKEXCHANGE_QUERY_VARIANTS,
+      });
+      if (variants.length === 0) return { signals: [], status: 'skipped', error: 'No valid query variants' };
+      const perVariantPageSize = Math.min(100, Math.max(5, Math.ceil(query.maxResults / variants.length) * 2));
+      const fromDate = Math.floor(ctx.now().getTime() / 1000) - query.sinceDays * 86400;
+      const candidates: Array<{ site: string; variant: SearchVariant; page: number; signals: RawSignal[]; hasMore: boolean }> = [];
+      const successfulRequests = { count: 0 };
       let failedRequests = 0;
       let firstError: string | undefined;
       let stopError: string | undefined;
-      const fromDate = Math.floor(ctx.now().getTime() / 1000) - query.sinceDays * 86400;
+      const firstPages = sites.flatMap((site) => variants.map((variant) => ({ site, variant, page: 1 })));
 
-      const requests = sites.flatMap((site) => query.keywords.map((keyword) => ({ site, keyword })));
-      for (const [requestIndex, request] of requests.entries()) {
-        const { site, keyword } = request;
-        if (signals.length >= query.maxResults || stopError) break;
-        attempted++;
+      async function fetchPage(site: string, variant: SearchVariant, page: number, hasPotentialNext: boolean): Promise<void> {
         const startedAt = ctx.now().getTime();
         let response: Response | null = null;
         let body: unknown = null;
         let requestFailed = false;
         let requestError: string | null = null;
         let itemsReturned = 0;
+        let backoff: number | null = null;
+        let quotaRemaining: number | null = null;
+        let hasMore = false;
+        let outcome: NonNullable<RequestRecord['outcome']> = 'failed';
+        const params: Record<string, string> = {
+          q: variant.phrase,
+          site,
+          sort: 'relevance',
+          order: 'desc',
+          fromdate: String(fromDate),
+          pagesize: String(perVariantPageSize),
+          page: String(page),
+          filter: 'withbody',
+        };
+        const url = new URL(STACK_EXCHANGE_ENDPOINT);
+        for (const [name, value] of Object.entries(params)) url.searchParams.set(name, value);
+        if (key) url.searchParams.set('key', key);
 
         try {
-          const url = new URL(STACK_EXCHANGE_ENDPOINT);
-          url.searchParams.set('q', keyword);
-          url.searchParams.set('site', site);
-          url.searchParams.set('sort', 'relevance');
-          url.searchParams.set('order', 'desc');
-          url.searchParams.set('fromdate', String(fromDate));
-          url.searchParams.set('pagesize', String(Math.min(query.maxResults, 100)));
-          url.searchParams.set('page', '1');
-          url.searchParams.set('filter', 'withbody');
-          if (key) url.searchParams.set('key', key);
           response = await fetchWithRetry(ctx.fetch, url.toString(), {
             headers: { 'User-Agent': ctx.userAgent, Accept: 'application/json' },
             timeoutMs: ctx.timeoutMs,
-            // Read response backoff before any retry can call the method again.
             maxRetries: 0,
           });
           body = await response.json();
+          backoff = backoffFrom(body);
+          quotaRemaining = quotaFrom(body);
+          if (isRecord(body) && Array.isArray(body.items)) {
+            itemsReturned = body.items.length;
+            hasMore = body.has_more === true;
+          }
+          if (!response.ok || (isRecord(body) && typeof body.error_id === 'number')) {
+            requestFailed = true;
+            const errorName = isRecord(body) && typeof body.error_name === 'string' ? body.error_name : null;
+            const rateLimited = response.status === 429 || errorName === 'throttle_violation' || errorName === 'temporarily_unavailable';
+            const unsupported = errorName === 'bad_parameter';
+            outcome = rateLimited ? 'rate_limited' : unsupported ? 'unsupported_query' : 'failed';
+            requestError = sanitizeRequestError(failureMessage(response, body));
+            firstError ??= requestError;
+          } else if (!isRecord(body) || !Array.isArray(body.items)) {
+            requestFailed = true;
+            outcome = 'failed';
+            requestError = 'Stack Exchange response had no items array';
+            firstError ??= requestError;
+          } else {
+            successfulRequests.count += 1;
+            outcome = itemsReturned === 0 ? 'no_results' : 'success';
+            const mapped = body.items.flatMap((item) => {
+              const signal = mapQuestion(item, site);
+              return signal ? [signal] : [];
+            });
+            candidates.push({ site, variant, page, signals: mapped, hasMore });
+          }
         } catch (err: unknown) {
           requestFailed = true;
-          requestError = response
-            ? sanitizeRequestError(failureMessage(response, body))
+          requestError = response ? sanitizeRequestError(failureMessage(response, body))
             : sanitizeRequestError(err instanceof Error ? err.message : String(err));
           firstError ??= requestError || 'Stack Exchange request failed';
         }
-
-        const quotaRemaining = quotaFrom(body);
-        const backoff = backoffFrom(body);
-        if (isRecord(body) && Array.isArray(body.items)) itemsReturned = body.items.length;
-        if (!requestFailed && response && response.ok) {
-          if (!isRecord(body) || !Array.isArray(body.items) || typeof body.error_id === 'number') {
-            requestFailed = true;
-            requestError = sanitizeRequestError(failureMessage(response, body));
-            firstError ??= requestError;
-          } else {
-            for (const item of body.items) {
-              if (signals.length >= query.maxResults) break;
-              const mapped = mapQuestion(item, site);
-              if (!mapped || seenIds.has(mapped.externalId)) continue;
-              seenIds.add(mapped.externalId);
-              signals.push(mapped);
-            }
-          }
-        } else if (!requestFailed) {
-          requestFailed = true;
-          requestError = sanitizeRequestError(failureMessage(response, body));
-          firstError ??= requestError;
-        }
-
         if (requestFailed) failedRequests++;
+        const willHaveNextRequest = hasPotentialNext || (hasMore && page < STACKEXCHANGE_MAX_PAGES_PER_VARIANT);
+        if (backoff !== null && willHaveNextRequest && backoff > 60) {
+          stopError = `Stack Exchange asked for a ${backoff}s backoff; stopped early`;
+          outcome = 'rate_limited';
+        }
 
         try {
           ctx.onRequest?.({
             source: 'stackexchange',
-            label: `${site}: ${keyword}`,
+            label: `${site} · ${variant.category}: ${variant.phrase} · page ${page}`,
             status: requestFailed ? 'failed' : 'ok',
             httpStatus: response?.status ?? null,
             durationMs: Math.max(0, ctx.now().getTime() - startedAt),
             itemsReturned,
             error: requestError,
             quotaRemaining,
+            outcome,
+            request: { endpoint: STACK_EXCHANGE_ENDPOINT, params },
+            responseSummary: {
+              returned: itemsReturned,
+              hasMore,
+              page,
+              quotaRemaining,
+              backoffSeconds: backoff,
+              errorId: isRecord(body) && typeof body.error_id === 'number' ? body.error_id : null,
+              errorName: isRecord(body) && typeof body.error_name === 'string' ? body.error_name : null,
+              errorMessage: isRecord(body) && typeof body.error_message === 'string' ? sanitizeRequestError(body.error_message.slice(0, 160)) : null,
+              sampleTitles: isRecord(body) && Array.isArray(body.items) ? body.items.slice(0, 3).flatMap((item) => {
+                const title = isRecord(item) ? item.title : null;
+                return typeof title === 'string' ? [htmlToText(title).slice(0, 120)] : [];
+              }) : [],
+            },
           });
         } catch {
           // Request logging must not change adapter behavior.
         }
 
-        if (backoff !== null) {
+        if (backoff !== null && willHaveNextRequest) {
           if (backoff > 60) {
-            stopError = `Stack Exchange asked for a ${backoff}s backoff; stopped early`;
-          } else if (
-            requestIndex < requests.length - 1
-            && signals.length < query.maxResults
-            && !(quotaRemaining !== null && quotaRemaining < 10)
-          ) {
+            // The run stops before another request when the required wait is too long.
+          } else if (!(quotaRemaining !== null && quotaRemaining < 10)) {
             try {
+              await ctx.onRateLimitWait?.('stackexchange', backoff * 1000);
               await sleep(backoff * 1000);
             } catch {
               stopError = 'Stack Exchange backoff wait failed; stopped early';
@@ -219,9 +253,43 @@ export function createStackExchangeAdapter(options: StackExchangeAdapterOptions 
         }
       }
 
+      for (const [index, request] of firstPages.entries()) {
+        if (stopError) break;
+        const hasPotentialNext = index < firstPages.length - 1;
+        await fetchPage(request.site, request.variant, request.page, hasPotentialNext);
+      }
+      if (!stopError) {
+        const laterPages = candidates.filter((candidate) => candidate.hasMore);
+        for (const [index, candidate] of laterPages.entries()) {
+          if (stopError) break;
+          const siteCount = candidates.filter((item) => item.site === candidate.site).flatMap((item) => item.signals).length;
+          if (siteCount >= query.maxResults) continue;
+          await fetchPage(candidate.site, candidate.variant, candidate.page + 1,
+            index < laterPages.length - 1 || candidate.page + 1 < STACKEXCHANGE_MAX_PAGES_PER_VARIANT);
+        }
+      }
+
+      const groups = sites.flatMap((site) => variants.map((variant) => candidates
+        .filter((candidate) => candidate.site === site && candidate.variant.phrase === variant.phrase)
+        .sort((left, right) => left.page - right.page)
+        .flatMap((candidate) => candidate.signals)));
+      const signals: RawSignal[] = [];
+      const seenIds = new Set<string>();
+      const maxLength = Math.max(0, ...groups.map((group) => group.length));
+      for (let index = 0; index < maxLength && signals.length < query.maxResults; index += 1) {
+        for (const group of groups) {
+          const signal = group[index];
+          if (!signal || seenIds.has(signal.externalId)) continue;
+          seenIds.add(signal.externalId);
+          signals.push(signal);
+          if (signals.length >= query.maxResults) break;
+        }
+      }
+
       if (stopError) {
         return { signals, status: 'degraded', error: stopError };
       }
+      const attempted = successfulRequests.count + failedRequests;
       if (failedRequests === attempted && attempted > 0) {
         return { signals, status: 'failed', error: firstError ?? stopError };
       }

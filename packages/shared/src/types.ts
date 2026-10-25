@@ -69,6 +69,7 @@ export interface LeadView {
   evidenceVerified: boolean;
   breakdown: ScoreBreakdown;
   enrichment: Enrichment;
+  criticTrace?: DecisionTrace | null;
 }
 
 export type FeedbackRequest = z.infer<typeof FeedbackRequestSchema>;
@@ -115,6 +116,9 @@ export interface RequestRecord {
   itemsReturned: number;
   error: string | null;
   quotaRemaining: number | null;
+  outcome?: 'success' | 'no_results' | 'failed' | 'rate_limited' | 'unsupported_query' | 'partial';
+  request?: { endpoint: string; params: Record<string, string> } | null;
+  responseSummary?: Record<string, unknown> | null;
 }
 
 export interface SourceRequestView extends RequestRecord {
@@ -220,4 +224,25 @@ export interface DecisionView {
   model: string | null;
   promptVersion: string | null;
   status: (typeof import('./constants').DECISION_STATUSES)[number];
+}
+
+export type SignalJourneyStage = 'scout' | 'classifier' | 'critic' | 'enricher' | 'scorer' | 'displacement' | 'outcome';
+export type SignalStageStatus = 'completed' | 'not_run' | 'failed' | 'not_available';
+
+export interface SignalRunSummary {
+  signalId: string;
+  leadId: string | null;
+  source: SourceId;
+  authorHandle: string;
+  url: string;
+  textPreview: string;
+  createdAtSource: string;
+  label: LeadLabel | null;
+  score: number | null;
+  stages: Record<SignalJourneyStage, { status: SignalStageStatus; reason?: string }>;
+}
+
+export interface SignalJourney extends SignalRunSummary {
+  text: string;
+  timeline: Array<{ stage: SignalJourneyStage; status: SignalStageStatus; reason: string | null; output: Record<string, unknown> | null }>;
 }

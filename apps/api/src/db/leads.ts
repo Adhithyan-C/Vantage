@@ -11,6 +11,7 @@ import type {
   LeadLabel,
   LeadDetail,
   LeadView,
+  DecisionTrace,
   FeedbackAction,
   RawSignal,
   ScoreBreakdown,
@@ -113,6 +114,17 @@ function parseClassifierOutput(value: unknown): ClassifierOutput | null {
   return parsed.success ? parsed.data : null;
 }
 
+function parseDecisionTrace(value: Record<string, unknown>): DecisionTrace | null {
+  if (typeof value.created_at !== 'string') return null;
+  return {
+    model: typeof value.model === 'string' ? value.model : null,
+    promptVersion: typeof value.prompt_version === 'string' ? value.prompt_version : null,
+    createdAt: value.created_at,
+    status: typeof value.status === 'string' ? value.status : 'error',
+    output: asRecord(value.output),
+  };
+}
+
 export function createLeadStore(db: SupabaseClient): LeadStore {
   return {
     async getScoringContext(runId) {
@@ -159,7 +171,11 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
         };
       }
 
-      const [{ data: signals, error: signalsError }, { data: decisions, error: decisionsError }] =
+      const [
+        { data: signals, error: signalsError },
+        { data: decisions, error: decisionsError },
+        { data: criticDecisions, error: criticError },
+      ] =
         await Promise.all([
           db
             .from('signals')
@@ -172,6 +188,13 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
             .eq('run_id', runId)
             .eq('agent', 'classifier')
             .eq('status', 'ok')
+            .in('signal_id', signalIds)
+            .order('created_at', { ascending: false }),
+          db
+            .from('decisions')
+            .select('signal_id, model, prompt_version, created_at, status, output')
+            .eq('run_id', runId)
+            .eq('agent', 'critic')
             .in('signal_id', signalIds)
             .order('created_at', { ascending: false }),
         ]);
@@ -265,7 +288,11 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
       if (signalIds.length === 0) {
         return [];
       }
-      const [{ data: signals, error: signalsError }, { data: decisions, error: decisionsError }] =
+      const [
+        { data: signals, error: signalsError },
+        { data: decisions, error: decisionsError },
+        { data: criticDecisions, error: criticError },
+      ] =
         await Promise.all([
           db
             .from('signals')
@@ -279,12 +306,22 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
             .eq('status', 'ok')
             .in('signal_id', signalIds)
             .order('created_at', { ascending: false }),
+          db
+            .from('decisions')
+            .select('signal_id, model, prompt_version, created_at, status, output')
+            .eq('run_id', runId)
+            .eq('agent', 'critic')
+            .in('signal_id', signalIds)
+            .order('created_at', { ascending: false }),
         ]);
       if (signalsError) {
         throw dbError('listLeads', signalsError);
       }
       if (decisionsError) {
         throw dbError('listLeads', decisionsError);
+      }
+      if (criticError) {
+        throw dbError('listLeads', criticError);
       }
       const signalById = new Map((signals ?? []).map((signal) => [signal.id as string, signal]));
       const decisionBySignal = new Map<string, Record<string, unknown>>();
@@ -293,6 +330,12 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
         if (!decisionBySignal.has(signalId)) {
           decisionBySignal.set(signalId, decision);
         }
+      }
+      const criticBySignal = new Map<string, DecisionTrace>();
+      for (const decision of criticDecisions ?? []) {
+        const signalId = decision.signal_id as string;
+        const trace = parseDecisionTrace(decision);
+        if (trace && !criticBySignal.has(signalId)) criticBySignal.set(signalId, trace);
       }
       return (leads ?? []).flatMap((lead): LeadView[] => {
         const signalId = lead.signal_id as string;
@@ -335,6 +378,7 @@ export function createLeadStore(db: SupabaseClient): LeadStore {
           evidenceVerified: decision.evidence_verified === true,
           breakdown: parsedBreakdown.data as ScoreBreakdown,
           enrichment,
+          criticTrace: criticBySignal.get(signalId) ?? null,
         }];
       });
     },

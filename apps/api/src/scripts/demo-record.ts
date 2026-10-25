@@ -3,12 +3,13 @@ import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
-import type { LeadDetail, LeadView, RunEvent, RunView, SourceRequestView, ThemeView } from '@vantage/shared';
+import type { LeadDetail, LeadView, RunEvent, RunView, SignalJourney, SignalRunSummary, SourceRequestView, ThemeView } from '@vantage/shared';
 import { getEnv } from '../config/env';
 import { createDb } from '../db/client';
 import { createLeadStore } from '../db/leads';
 import { createRunStore } from '../db/runs';
 import { createThemeStore } from '../db/themes';
+import { createSignalJourneyStore } from '../db/signalJourneys';
 import { DemoRunSchema } from '../demo/schema';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,6 +22,8 @@ export interface DemoFixtureInput {
   details: Record<string, LeadDetail>;
   requests?: SourceRequestView[];
   themes?: ThemeView[];
+  collectedSignals?: SignalRunSummary[];
+  journeys?: Record<string, SignalJourney>;
 }
 
 export function buildDemoFixture(input: DemoFixtureInput) {
@@ -40,6 +43,8 @@ export function buildDemoFixture(input: DemoFixtureInput) {
     details: input.details,
     requests: input.requests ?? [],
     themes: input.themes ?? [],
+    collectedSignals: input.collectedSignals,
+    journeys: input.journeys,
   });
 }
 
@@ -59,6 +64,7 @@ async function main(): Promise<void> {
   const db = createDb(getEnv());
   const runStore = createRunStore(db);
   const themeStore = createThemeStore(db);
+  const signalJourneyStore = createSignalJourneyStore(db);
   const leadStore = createLeadStore(db);
   const run = await runStore.getRun(values.run);
   if (!run) {
@@ -90,6 +96,20 @@ async function main(): Promise<void> {
     recordedAt: new Date().toISOString(), run, events, leads, details,
     requests: await runStore.listSourceRequests(values.run),
     themes: await themeStore.listThemes(values.run),
+    ...await (async () => {
+      const collectedSignals: SignalRunSummary[] = [];
+      for (let offset = 0; ; offset += 100) {
+        const page = await signalJourneyStore.listRunSignals(values.run!, 100, offset);
+        collectedSignals.push(...page.signals);
+        if (collectedSignals.length >= page.total || page.signals.length === 0) break;
+      }
+      const journeys: Record<string, SignalJourney> = {};
+      for (const signal of collectedSignals) {
+        const journey = await signalJourneyStore.getSignalJourney(values.run!, signal.signalId);
+        if (journey) journeys[signal.signalId] = journey;
+      }
+      return { collectedSignals, journeys };
+    })(),
   });
   writeFileSync(outPath, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
   console.log(`Recorded ${fixture.events.length} events, ${fixture.leads.length} leads, ${Object.keys(fixture.details).length} details`);

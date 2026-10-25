@@ -18,7 +18,8 @@
     "demo:record": "npm run demo:record --workspace @vantage/api --",
     "llm:check": "npm run llm:check --workspace @vantage/api --",
     "embed:check": "npm run embed:check --workspace @vantage/api --",
-    "eval:sample": "npm run eval:sample --workspace @vantage/api --"
+    "eval:sample": "npm run eval:sample --workspace @vantage/api --",
+    "eval:recall": "npm run eval:recall --workspace @vantage/api --"
   },
   "devDependencies": {
     "typescript": "7.0.2",

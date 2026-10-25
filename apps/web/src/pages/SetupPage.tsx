@@ -122,7 +122,7 @@ export function SetupPage() {
 
   const onChange =
     (key: keyof FormState) =>
-    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>): void => {
+    (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>): void => {
       const value = event.target.value;
       setForm((previous) => ({ ...previous, [key]: value }));
     };
@@ -322,21 +322,25 @@ export function SetupPage() {
           <div className="field-row">
             <Field
               id="sinceDays"
-              label="Look back (days)"
-              hint="1 to 365"
+            label="Look back"
+            hint="Research mode includes posts up to three years old."
               error={errorOf('params.sinceDays')}
             >
-              <input
+            <select
                 id="sinceDays"
                 className="control"
-                type="number"
-                min={1}
-                max={365}
                 value={form.sinceDays}
                 onChange={onChange('sinceDays')}
                 aria-invalid={errorOf('params.sinceDays') ? true : undefined}
                 aria-describedby={describedBy('sinceDays', 'params.sinceDays')}
-              />
+            >
+              <option value="30">30 days</option>
+              <option value="90">90 days</option>
+              <option value="180">180 days</option>
+              <option value="365">1 year</option>
+              <option value="730">2 years (research mode)</option>
+              <option value="1095">3 years (research mode)</option>
+            </select>
             </Field>
             <Field
               id="maxResults"
@@ -382,10 +386,10 @@ export function SetupPage() {
                     aria-describedby="source-stackexchange-hint"
                     onChange={(event) => updateSource('stackexchange', event.target.checked)}
                   />
-                  Stack Exchange (Software Recommendations)
+                  Stack Exchange (Software Recommendations and Software Engineering)
                 </label>
                 <p className="muted field-hint" id="source-stackexchange-hint">
-                  Questions where people ask for software recommendations.
+                  Questions across Software Recommendations and Software Engineering.
                 </p>
               </div>
               <span className="badge badge-live">Live</span>

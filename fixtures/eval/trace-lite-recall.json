@@ -1,0 +1,27 @@
+{
+  "seller": {
+    "productName": "TraceLite",
+    "problemDescription": "Self-hosted error tracking, error grouping, and affordable error monitoring for software teams.",
+    "idealCustomer": "Software teams evaluating error monitoring for applications they operate or sell",
+    "competitors": ["Sentry"]
+  },
+  "search": {
+    "keywords": [
+      "self-hosted error tracking",
+      "Sentry alternative",
+      "error grouping",
+      "affordable error monitoring"
+    ],
+    "sinceDays": 1095,
+    "maxResults": 100,
+    "sources": ["hackernews", "stackexchange"]
+  },
+  "expected": [
+    { "title": "I gave up on self-hosted Sentry" },
+    { "title": "Show HN: Bugsink - Self-Hosted Error Tracking" },
+    { "title": "Show HN: I built a self-hosted error tracker in Rails" },
+    { "title": "Which error tracking system to choose for a PHP application?" },
+    { "title": "Monitoring options for a medium-sized company" },
+    { "title": "Error Monitoring On The Apps Which I'm Selling" }
+  ]
+}

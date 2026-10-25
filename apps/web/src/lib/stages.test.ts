@@ -44,4 +44,9 @@ describe('stageStatus', () => {
     const scout = event('scout', 'progress', 'Source failed', '2026-10-01T00:00:00Z', { status: 'failed' });
     expect(stageStatus('scout', [scout], 'failed').state).toBe('failed');
   });
+
+  it('shows the recorded displacement skip as skipped instead of a warning', () => {
+    const skipped = event('displacement', 'info', 'Displacement skipped: disabled by configuration', '2026-10-01T00:00:03Z', { skipped: true, reason: 'disabled by configuration' });
+    expect(stageStatus('displacement', [skipped], 'completed')).toMatchObject({ state: 'skipped', label: 'Skipped' });
+  });
 });

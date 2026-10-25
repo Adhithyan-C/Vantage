@@ -84,10 +84,10 @@ describe('Phase 6 server-rendered components', () => {
     const setup = renderToString(<SetupPage />);
     expect(setup).toContain('Labelled test posts written for Vantage. They are not real posts and ignore your keywords.');
     expect(setup).toContain('Sample dataset (synthetic)');
-    expect(setup).toContain('Stack Exchange (Software Recommendations)');
+    expect(setup).toContain('Stack Exchange (Software Recommendations and Software Engineering)');
     expect(setup).toContain('Use 2 to 5 short, specific phrases. Long lists dilute the results.');
     expect(setup).toContain('aria-describedby="source-stackexchange-hint" checked=""');
-    expect(setup).toContain('Questions where people ask for software recommendations.');
+    expect(setup).toContain('Questions across Software Recommendations and Software Engineering.');
   });
 
   it('uses the explicit synthetic source label', () => {

@@ -133,6 +133,12 @@ describe('schemas', () => {
     expect(RunCreateRequestSchema.safeParse(invalid).success).toBe(false);
   });
 
+  it('accepts the three-year research lookback and rejects values beyond it', () => {
+    const request = { seller, params: { keywords: ['zendesk alternative'], sinceDays: 1095, maxResults: 50 } };
+    expect(RunCreateRequestSchema.safeParse(request).success).toBe(true);
+    expect(RunCreateRequestSchema.safeParse({ ...request, params: { ...request.params, sinceDays: 1096 } }).success).toBe(false);
+  });
+
   it('maxResults 101 fails', () => {
     const invalid = {
       seller,

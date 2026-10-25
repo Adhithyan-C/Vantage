@@ -4,7 +4,7 @@ import type { AdapterContext, SourceQuery } from '../src/sources/types.js';
 import type { RequestRecord } from '@vantage/shared';
 
 const NOW = new Date('2026-10-20T00:00:00.000Z');
-const query: SourceQuery = { keywords: ['helpdesk'], sinceDays: 30, maxResults: 10 };
+const query: SourceQuery = { keywords: ['helpdesk'], sinceDays: 30, maxResults: 10, variants: [{ category: 'problem', phrase: 'helpdesk' }] };
 
 function question(id = 1): Record<string, unknown> {
   return {
@@ -82,7 +82,7 @@ describe('Stack Exchange adapter', () => {
     expect(url?.searchParams.get('sort')).toBe('relevance');
     expect(url?.searchParams.get('order')).toBe('desc');
     expect(url?.searchParams.get('fromdate')).toBe(String(Math.floor(NOW.getTime() / 1000) - 30 * 86400));
-    expect(url?.searchParams.get('pagesize')).toBe('10');
+    expect(url?.searchParams.get('pagesize')).toBe('20');
     expect(url?.searchParams.get('page')).toBe('1');
     expect(url?.searchParams.get('filter')).toBe('withbody');
     expect(url?.searchParams.get('key')).toBe('public-app-key');
@@ -101,6 +101,27 @@ describe('Stack Exchange adapter', () => {
     expect(url.searchParams.has('key')).toBe(false);
   });
 
+  it('defaults to Software Recommendations and Software Engineering', async () => {
+    const sites: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      sites.push(new URL(String(input)).searchParams.get('site') ?? '');
+      return jsonResponse(apiBody([]));
+    };
+    await createStackExchangeAdapter({ sites: [] }).search(query, makeContext(fetchFn));
+    expect([...new Set(sites)]).toEqual(['softwarerecs', 'softwareengineering']);
+  });
+
+  it('paginates while has_more is true and caps requests to the configured page count', async () => {
+    const pages: string[] = [];
+    const fetchFn: typeof fetch = async (input) => {
+      const page = new URL(String(input)).searchParams.get('page') ?? '';
+      pages.push(page);
+      return jsonResponse(apiBody([question(Number(page))], { has_more: page === '1' }));
+    };
+    await createStackExchangeAdapter({ sites: ['softwarerecs'] }).search(query, makeContext(fetchFn));
+    expect(pages).toEqual(['1', '2']);
+  });
+
   it('makes one request per keyword and site in site-then-keyword order', async () => {
     const urls: URL[] = [];
     let id = 0;
@@ -110,7 +131,8 @@ describe('Stack Exchange adapter', () => {
       return jsonResponse(apiBody([question(id)]));
     };
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs', 'stackoverflow'] });
-    const result = await adapter.search({ ...query, keywords: ['first', 'second'] }, makeContext(fetchFn));
+    const variants = ['first', 'second'].map((phrase) => ({ category: 'problem' as const, phrase }));
+    const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants }, makeContext(fetchFn));
     expect(urls.map((url) => [url.searchParams.get('site'), url.searchParams.get('q')])).toEqual([
       ['softwarerecs', 'first'],
       ['softwarerecs', 'second'],
@@ -123,7 +145,8 @@ describe('Stack Exchange adapter', () => {
   it('deduplicates question ids across keywords', async () => {
     const fetchFn: typeof fetch = async () => jsonResponse(apiBody([question(7)]));
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
-    const result = await adapter.search({ ...query, keywords: ['first', 'second'] }, makeContext(fetchFn));
+    const variants = ['first', 'second'].map((phrase) => ({ category: 'problem' as const, phrase }));
+    const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants }, makeContext(fetchFn));
     expect(result.signals).toHaveLength(1);
   });
 
@@ -134,7 +157,7 @@ describe('Stack Exchange adapter', () => {
       return jsonResponse(apiBody([question(requests), question(requests + 10)]));
     };
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
-    const result = await adapter.search({ ...query, keywords: ['first', 'second'], maxResults: 1 }, makeContext(fetchFn));
+    const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants: [{ category: 'problem', phrase: 'first' }], maxResults: 1 }, makeContext(fetchFn));
     expect(result.signals).toHaveLength(1);
     expect(requests).toBe(1);
   });
@@ -150,7 +173,8 @@ describe('Stack Exchange adapter', () => {
       sites: ['softwarerecs'],
       sleep: async (ms) => { waits.push(ms); },
     });
-    await adapter.search({ ...query, keywords: ['first', 'second'] }, makeContext(fetchFn));
+    const variants = ['first', 'second'].map((phrase) => ({ category: 'problem' as const, phrase }));
+    await adapter.search({ ...query, keywords: ['first', 'second'], variants }, makeContext(fetchFn));
     expect(waits).toEqual([2000]);
   });
 
@@ -160,7 +184,7 @@ describe('Stack Exchange adapter', () => {
     const fetchFn: typeof fetch = async () => {
       requests++;
       return requests === 1
-        ? jsonResponse(apiBody([question()]))
+        ? jsonResponse(apiBody([question()], { has_more: true, backoff: 90 }))
         : jsonResponse({ error_id: 502, error_name: 'throttle_violation', backoff: 90 }, 502);
     };
     const adapter = createStackExchangeAdapter({
@@ -168,13 +192,13 @@ describe('Stack Exchange adapter', () => {
       sleep: async (ms) => { waits.push(ms); },
     });
     const result = await adapter.search(
-      { ...query, keywords: ['first', 'second'] },
+      { ...query, keywords: ['first', 'second'], variants: [{ category: 'problem', phrase: 'first' }] },
       { ...makeContext(fetchFn), maxRetries: 3 },
     );
     expect(result.status).toBe('degraded');
     expect(result.error).toBe('Stack Exchange asked for a 90s backoff; stopped early');
     expect(result.signals).toHaveLength(1);
-    expect(requests).toBe(2);
+    expect(requests).toBe(1);
     expect(waits).toEqual([]);
   });
 
@@ -185,7 +209,7 @@ describe('Stack Exchange adapter', () => {
       return jsonResponse(apiBody([question()], { quota_remaining: 5 }));
     };
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
-    const result = await adapter.search({ ...query, keywords: ['first', 'second'] }, makeContext(fetchFn));
+    const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants: [{ category: 'problem', phrase: 'first' }] }, makeContext(fetchFn));
     expect(result).toMatchObject({ status: 'degraded', error: 'Stack Exchange quota nearly used (5 left)' });
     expect(result.signals).toHaveLength(1);
     expect(requests).toBe(1);
@@ -198,7 +222,8 @@ describe('Stack Exchange adapter', () => {
       return requests === 1 ? jsonResponse(apiBody([question()])) : new Response('error', { status: 500 });
     };
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
-    const result = await adapter.search({ ...query, keywords: ['first', 'second'] }, makeContext(fetchFn));
+    const variants = ['first', 'second'].map((phrase) => ({ category: 'problem' as const, phrase }));
+    const result = await adapter.search({ ...query, keywords: ['first', 'second'], variants }, makeContext(fetchFn));
     expect(result.status).toBe('degraded');
     expect(result.signals).toHaveLength(1);
   });
@@ -214,6 +239,16 @@ describe('Stack Exchange adapter', () => {
     const result = await adapter.search(query, makeContext(fetchFn));
     expect(result.status).toBe('failed');
     expect(result.error).toBe('Stack Exchange API error 502');
+  });
+
+  it('records bad_parameter as unsupported_query rather than an empty success', async () => {
+    const records: RequestRecord[] = [];
+    const fetchFn: typeof fetch = async () => jsonResponse({ error_id: 400, error_name: 'bad_parameter', error_message: 'Unsupported query' });
+    const result = await createStackExchangeAdapter({ sites: ['softwarerecs'] }).search(query, {
+      ...makeContext(fetchFn), onRequest: (record) => records.push(record),
+    });
+    expect(result.status).toBe('failed');
+    expect(records[0]?.outcome).toBe('unsupported_query');
   });
 
   it('treats a successful response without an items array as failed', async () => {
@@ -264,7 +299,10 @@ describe('Stack Exchange adapter', () => {
     const adapter = createStackExchangeAdapter({ sites: ['softwarerecs'] });
     await adapter.search(query, { ...makeContext(fetchFn), onRequest: (record) => records.push(record) });
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ source: 'stackexchange', label: 'softwarerecs: helpdesk', status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: 88 });
+    expect(records[0]).toMatchObject({ source: 'stackexchange', label: expect.stringContaining('problem: helpdesk'), status: 'ok', httpStatus: 200, itemsReturned: 1, quotaRemaining: 88 });
+    expect(records[0]?.request).toMatchObject({ endpoint: 'https://api.stackexchange.com/2.3/search/advanced', params: { q: 'helpdesk', site: 'softwarerecs' } });
+    expect(JSON.stringify(records[0]?.request)).not.toContain('public-app-key');
+    expect(records[0]?.responseSummary).toMatchObject({ returned: 1, hasMore: false, quotaRemaining: 88 });
     expect(records[0]?.durationMs).toBeGreaterThanOrEqual(0);
   });
 

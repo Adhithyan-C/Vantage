@@ -53,7 +53,7 @@ export const ScoreBreakdownSchema = z.object({
 
 export const RunParamsSchema = z.object({
   keywords: z.array(z.string().trim().min(1).max(100)).min(1).max(10),
-  sinceDays: z.number().int().min(1).max(365),
+  sinceDays: z.number().int().min(1).max(1095),
   maxResults: z.number().int().min(1).max(100),
   sources: z.array(z.enum(SOURCE_IDS)).min(1).optional(),
 });

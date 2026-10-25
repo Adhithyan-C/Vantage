@@ -32,7 +32,7 @@ export interface ClassifySummary {
 }
 
 export type ClassifyProgress = (done: number, total: number) => void | Promise<void>;
-export type ClassifyRunOptions = { keywords?: string[] };
+export type ClassifyRunOptions = { keywords?: string[]; signalIds?: string[]; onRateLimitWait?: (provider: string, waitMs: number) => void | Promise<void> };
 export type ClassifyStage = (
   runId: string,
   onProgress?: ClassifyProgress,
@@ -117,7 +117,8 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
     const queryTerms = [...new Set((options?.keywords ?? []).flatMap((keyword) =>
       keyword.toLowerCase().match(/[a-z0-9]+/g) ?? [],
     ).filter((term) => term.length >= 4 && !stopwords.has(term)))];
-    const signals = [...context.signals].sort((left, right) => {
+    const allowedIds = options?.signalIds ? new Set(options.signalIds) : null;
+    const signals = context.signals.filter((signal) => !allowedIds || allowedIds.has(signal.id)).sort((left, right) => {
       if (options?.keywords) {
         const leftText = left.text.toLowerCase();
         const rightText = right.text.toLowerCase();
@@ -176,6 +177,7 @@ export function createClassifyStage({ llm, store, config }: ClassifyStageOptions
           system,
           prompt,
           schema: ClassifierOutputSchema,
+          onRateLimitWait: options?.onRateLimitWait,
         });
         if (!result.ok) {
           await store.saveDecision(

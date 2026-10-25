@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { performance } from 'node:perf_hooks';
 import type { z } from 'zod';
 import type { ClassifierOutput } from '@vantage/shared';
 import type { DecisionRow, DecisionStore, RunClassificationContext, RunSignalContext } from '../src/db/decisions';
@@ -209,5 +210,22 @@ describe('createClassifyStage', () => {
     });
     await createClassifyStage({ llm, store, config: { ...config, concurrency: 2 } })('run-1');
     expect(maximum).toBe(2);
+  });
+
+  it('measures lower fake-provider latency with two bounded workers than one', async () => {
+    async function elapsedFor(workerCount: number): Promise<number> {
+      const { store } = storeFor(context(8));
+      const llm = llmFor(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 12));
+        return { ok: true, data: output, model: 'fake-provider', attempts: 1 };
+      });
+      const started = performance.now();
+      await createClassifyStage({ llm, store, config: { ...config, concurrency: workerCount } })('timing-run');
+      return performance.now() - started;
+    }
+    const sequentialMs = await elapsedFor(1);
+    const concurrentMs = await elapsedFor(2);
+    console.info(`Fake-provider classifier timing: concurrency 1 ${sequentialMs.toFixed(1)} ms; concurrency 2 ${concurrentMs.toFixed(1)} ms`);
+    expect(concurrentMs).toBeLessThan(sequentialMs);
   });
 });

@@ -9,11 +9,13 @@ import { createClassifyStage } from './agents/classifier';
 import { createCriticStage } from './agents/critic';
 import { createScoreStage } from './agents/scorer';
 import { createDisplaceStage, embedTexts } from './agents/displacement';
+import { createRelevanceStage } from './agents/relevance';
 import { createDecisionStore } from './db/decisions';
 import { createLeadStore } from './db/leads';
 import { createDb } from './db/client';
 import { createRunStore } from './db/runs';
 import { createThemeStore } from './db/themes';
+import { createSignalJourneyStore } from './db/signalJourneys';
 import { createLlmClient } from './llm/client';
 import { createRunsRouter } from './routes/runs';
 import { createLeadsRouter } from './routes/leads';
@@ -52,6 +54,7 @@ async function main(): Promise<void> {
       demoMode: true,
       leadStore: replay.leadStore,
       themes: replay.themeStore,
+      signalJourneyStore: replay.signalJourneyStore,
     }));
     app.use(createLeadsRouter({ store: replay.leadStore }));
     app.use(createReportRouter({ runStore: replay.runStore, leadStore: replay.leadStore }));
@@ -63,6 +66,7 @@ async function main(): Promise<void> {
   const env = getEnv();
   const db = createDb(env);
   const store = createRunStore(db);
+  const signalJourneyStore = createSignalJourneyStore(db);
   let decisionStore: ReturnType<typeof createDecisionStore> | undefined;
   let leadStore: ReturnType<typeof createLeadStore> | undefined;
   let leadsRouter: express.Router | undefined;
@@ -72,6 +76,7 @@ async function main(): Promise<void> {
   let critic: ReturnType<typeof createCriticStage> | undefined;
   let themes: ReturnType<typeof createThemeStore> | undefined;
   let displace: ReturnType<typeof createDisplaceStage> | undefined;
+  let relevance: ReturnType<typeof createRelevanceStage> | undefined;
   try {
     const llm = createLlmClient({
       fetch: globalThis.fetch,
@@ -82,6 +87,7 @@ async function main(): Promise<void> {
     decisionStore = createDecisionStore(db);
     classify = createClassifyStage({ llm, store: decisionStore, config: LLM_CONFIG });
     critic = createCriticStage({ llm, store: decisionStore, config: LLM_CONFIG });
+    relevance = createRelevanceStage({ store: decisionStore, embed: embedTexts });
   } catch (err) {
     console.warn(`Warning: classifier is unavailable: ${errorMessage(err)}`);
   }
@@ -135,8 +141,10 @@ async function main(): Promise<void> {
       enableDisplacement: env.ENABLE_DISPLACEMENT,
       themes,
       decisionStore,
+      relevance,
       score,
       leadStore,
+      signalJourneyStore,
     }),
   );
   if (leadsRouter) {

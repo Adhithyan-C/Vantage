@@ -44,7 +44,17 @@ class FakeStore implements RunStore {
   }
 
   async getRun(_runId: string): Promise<RunView | null> {
-    throw new Error('not used');
+    return {
+      id: _runId,
+      status: 'running',
+      demo: false,
+      params,
+      startedAt: '2026-10-08T00:00:00Z',
+      finishedAt: null,
+      seller: { productName: 'Support tool', problemDescription: 'customer support tooling problem', idealCustomer: null, competitors: [] },
+      sources: [],
+      signalCount: 0,
+    };
   }
 
   async listEvents(_runId: string, _afterId: number): Promise<RunEvent[]> {
@@ -172,7 +182,7 @@ describe('runPipeline', () => {
       ['progress', 'Clustering competitor complaints'],
       ['info', 'Found 1 theme(s) from 3 complaint signal(s)'],
     ]);
-    expect(events[1]?.counts).toEqual({ complaintSignals: 3, competitors: 1, skipped: 0, themeCount: 1 });
+    expect(events[1]?.counts).toEqual({ complaintSignals: 3, competitors: 1, skipped: 0, skippedCompetitors: [], themeCount: 1 });
     expect(store.statusCalls.at(-1)?.status).toBe('completed');
   });
 
@@ -204,7 +214,7 @@ describe('runPipeline', () => {
     const deps = { ...displacementDeps(store, displace), enableDisplacement: false };
     await runPipeline(deps, RUN_ID, params);
     expect(displace).not.toHaveBeenCalled();
-    expect(store.events.some((event) => event.agent === 'displacement')).toBe(false);
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'displacement', kind: 'info', message: 'Displacement skipped: disabled by configuration' }));
   });
 
   it('runs the critic after classification and before scoring, then emits review events', async () => {
@@ -234,6 +244,44 @@ describe('runPipeline', () => {
       { agent: 'critic', kind: 'info', message: 'Reviewed 1 signal(s)', counts: { reviewed: 1, failed: 0 } },
     ]);
     expect(store.statusCalls.at(-1)?.status).toBe('completed');
+  });
+
+  it('records relevance exclusions and passes only eligible ids to classification', async () => {
+    const store = new FakeStore();
+    const classify = vi.fn<NonNullable<PipelineDeps['classify']>>(async (_runId, _onProgress, options) => ({
+      total: 1, classified: 1, reused: 0, failed: 0,
+      labels: { buyer_intent: 1, competitor_complaint: 0, venting: 0, noise: 0 },
+      verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+    }));
+    const deps: PipelineDeps = {
+      store,
+      adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1), makeSignal(2)], status: 'ok' })],
+      ctx,
+      relevance: async () => ({ eligibleIds: ['eligible'], total: 2, eligible: 1, excluded: 1, threshold: 0.36, scores: { eligible: 0.8, excluded: 0.1 } }),
+      classify,
+    };
+    await runPipeline(deps, RUN_ID, params);
+    expect(classify).toHaveBeenCalledWith(RUN_ID, expect.any(Function), expect.objectContaining({ signalIds: ['eligible'] }));
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'scout', kind: 'info', counts: { relevanceTotal: 2, eligible: 1, excluded: 1, threshold: 0.36 } }));
+  });
+
+  it('fails open when relevance scoring fails and records a warning', async () => {
+    const store = new FakeStore();
+    const classify = vi.fn(async () => ({
+      total: 1, classified: 1, reused: 0, failed: 0,
+      labels: { buyer_intent: 1, competitor_complaint: 0, venting: 0, noise: 0 },
+      verifiedQuotes: 1, droppedQuotes: 0, capped: false, failureReasons: {},
+    }));
+    await runPipeline({
+      store,
+      adapters: [fakeAdapter('hackernews', { signals: [makeSignal(1)], status: 'ok' })],
+      ctx,
+      relevance: async () => { throw new Error('embedding unavailable'); },
+      classify,
+    }, RUN_ID, params);
+    expect(classify).toHaveBeenCalled();
+    expect(store.events).toContainEqual(expect.objectContaining({ agent: 'scout', kind: 'warning', message: expect.stringContaining('all collected signals will continue') }));
+    expect(store.statusCalls.at(-1)?.status).toBe('completed_with_warnings');
   });
 
   it('warns and degrades run status when critic reviews fail or throw', async () => {
@@ -358,6 +406,7 @@ describe('runPipeline', () => {
       ['scout', 'hackernews: ok, fetched 2'],
       ['scout', 'Removed 0 duplicate(s): 2 unique signal(s)'],
       ['scout', 'Stored 2 new and refreshed 0 existing signal(s)'],
+      ['displacement', 'Displacement skipped: stage unavailable'],
       ['orchestrator', 'Run completed'],
     ]);
     expect(store.sourceCalls[0]?.patch.status).toBe('running');

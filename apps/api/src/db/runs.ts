@@ -191,6 +191,9 @@ export function createRunStore(db: SupabaseClient): RunStore {
         items_returned: record.itemsReturned,
         error: record.error,
         quota_remaining: record.quotaRemaining,
+        outcome: record.outcome ?? null,
+        request: record.request ?? null,
+        response_summary: record.responseSummary ?? null,
       }));
       const { error } = await db.from('source_requests').insert(rows);
       if (error) {
@@ -201,7 +204,7 @@ export function createRunStore(db: SupabaseClient): RunStore {
     async listSourceRequests(runId) {
       const { data, error } = await db
         .from('source_requests')
-        .select('id,source,label,status,http_status,duration_ms,items_returned,error,quota_remaining,created_at')
+        .select('id,source,label,status,http_status,duration_ms,items_returned,error,quota_remaining,outcome,request,response_summary,created_at')
         .eq('run_id', runId)
         .order('id', { ascending: true })
         .limit(200);
@@ -218,6 +221,9 @@ export function createRunStore(db: SupabaseClient): RunStore {
         itemsReturned: Number(row.items_returned),
         error: (row.error as string | null) ?? null,
         quotaRemaining: (row.quota_remaining as number | null) ?? null,
+        outcome: typeof row.outcome === 'string' ? row.outcome as SourceRequestView['outcome'] : undefined,
+        request: row.request && typeof row.request === 'object' ? row.request as SourceRequestView['request'] : null,
+        responseSummary: row.response_summary && typeof row.response_summary === 'object' ? row.response_summary as Record<string, unknown> : null,
         createdAt: row.created_at as string,
       }));
     },

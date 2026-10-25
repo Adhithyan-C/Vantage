@@ -62,6 +62,9 @@ export function stageStatus(agent: AgentId, events: RunEvent[], runStatus: RunSt
     return { state: runStatus === 'running' ? 'waiting' : 'skipped', label: LABELS[runStatus === 'running' ? 'waiting' : 'skipped'], summary: null, durationMs: null };
   }
   const stageEvents = events.filter((event) => event.agent === agent);
+  const displacementSkip = agent === 'displacement'
+    ? stageEvents.find((event) => event.kind === 'info' && event.message.startsWith('Displacement skipped:'))
+    : undefined;
   let finalEvent: RunEvent | undefined;
   if (agent === 'scout') {
     finalEvent = stageEvents.find((event) => count(event, 'afterDedupe') !== null);
@@ -73,7 +76,9 @@ export function stageStatus(agent: AgentId, events: RunEvent[], runStatus: RunSt
   }
 
   let state: StageState;
-  if (stageEvents.length === 0) {
+  if (displacementSkip) {
+    state = 'skipped';
+  } else if (stageEvents.length === 0) {
     state = runStatus === 'running' ? 'waiting' : 'skipped';
   } else if (agent === 'scout') {
     const sourceStatuses = stageEvents.flatMap((event) => {

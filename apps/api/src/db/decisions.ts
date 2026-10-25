@@ -26,7 +26,7 @@ export interface RunClassificationContext {
 export interface DecisionRow {
   runId: string;
   signalId: string;
-  agent: 'classifier' | 'critic';
+  agent: 'classifier' | 'critic' | 'scout';
   model: string | null;
   promptVersion: string;
   inputHash: string;
